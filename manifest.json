@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.iammhador.spotify-pulse",
+  "name": "Spotify Pulse",
+  "version": "1.0.0",
+  "author": "iammhador",
+  "license": "MIT",
+  "description": "An animated Spotify player for the bar: Song — Artist, album-colored player card, synced lyrics",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Spotify Pulse",
+    "description": "Now playing on Spotify, with an animated player card on click",
+    "category": "Media",
+    "defaultSection": "center",
+    "allowMultiple": false
+  }
+}
