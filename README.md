@@ -48,7 +48,7 @@ An animated Spotify player for the [Omarchy](https://omarchy.org) bar.
 - Omarchy 4, which provides the Quickshell-based `omarchy-shell`.
 - The Spotify desktop app.
 - `curl`, used once per track to cache the album cover for color sampling. It ships with every Omarchy install.
-- No accounts, API keys, sudo or extra services.
+- No accounts, API keys, root access or extra services.
 
 ```bash
 omarchy plugin add https://github.com/iammhador/omarchy-spotify-pulse.git --enable
