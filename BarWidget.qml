@@ -3,9 +3,9 @@
 // Bar:  "Song — Artist" with a live equalizer, a slide transition on track
 //       change and a ping-pong marquee for long titles. Left click opens the
 //       card, middle click plays/pauses, scroll changes Spotify's volume.
-// Card: album art over a blurred backdrop, a progress ring, seek bar,
-//       shuffle / previous / play / next / repeat, Spotify volume and
-//       synced lyrics from lrclib.net. Colors follow the album art.
+// Card: cover-first player tinted by the album art: glowing cover, seek,
+//       shuffle / previous / play / next / repeat, Spotify volume, and
+//       synced lyrics (lrclib.net) that flip in on the back of the cover.
 //
 // Everything is driven by Spotify's MPRIS interface, so it stays in sync with
 // the desktop app, media keys and Spotify Connect. No account or API key.
@@ -15,7 +15,6 @@
 
 import QtQuick
 import QtQuick.Effects
-import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Mpris
@@ -229,7 +228,7 @@ BarWidget {
   onLyricsOnChanged: loadLyrics()
   onPillTextChanged: pill.swapTrack()
   onTrackKeyChanged: {
-    if (popupOpen) heroSwap.restart()
+    if (popupOpen) trackAnim.restart()
     loadLyrics()
   }
 
@@ -254,7 +253,7 @@ BarWidget {
         shuffle: root.running ? root.player.shuffle : false,
         loop: root.running ? root.player.loopState : 0,
         volume: root.running ? root.player.volume : 0,
-        accent: String(root.accent), lyricsLines: root.lyricLines.length
+        accent: String(root.accent), lyricsOn: root.lyricsOn, lyricsLines: root.lyricLines.length
       })
     }
   }
@@ -430,6 +429,10 @@ BarWidget {
   }
 
   // ================================================================ CARD
+  //
+  // Cover-first: the album cover is the hero, glowing in its own color over a
+  // blurred copy of itself that fills the card. Lyrics flip in on the back of
+  // the cover.
 
   KeyboardPanel {
     id: card
@@ -438,7 +441,7 @@ BarWidget {
     bar: root.bar
     open: root.popupOpen
     focusTarget: keys
-    contentWidth: card.fittedContentWidth(Style.space(400))
+    contentWidth: card.fittedContentWidth(Style.space(340))
     contentHeight: card.fittedContentHeight(content.implicitHeight)
 
     Item {
@@ -462,301 +465,411 @@ BarWidget {
       }
     }
 
+    // ---- Backdrop: the blurred cover tints the whole card ---------------
+    Item {
+      id: backdrop
+      anchors.fill: parent
+      anchors.margins: -card.padding
+      visible: root.blurBackdrop && backdropSrc.status === Image.Ready
+      // The popup doesn't clip, and the blur reaches well past its source.
+      clip: true
+      layer.enabled: Style.cornerRadius > 0
+      layer.effect: MultiEffect {
+        maskEnabled: true
+        maskSource: backdropMask
+      }
+
+      Image {
+        id: backdropSrc
+        anchors.fill: parent
+        source: root.popupOpen && root.blurBackdrop ? root.artUrl : ""
+        sourceSize: Qt.size(64, 64)
+        fillMode: Image.PreserveAspectCrop
+        asynchronous: true
+        visible: false
+      }
+      MultiEffect {
+        anchors.fill: parent
+        anchors.margins: -Style.space(40)
+        source: backdropSrc
+        blurEnabled: true
+        blur: 1.0
+        blurMax: 64
+        saturation: 0.25
+        opacity: 0.9
+        // Slow drift keeps the color field alive without a timer.
+        NumberAnimation on scale {
+          running: root.popupOpen && root.playing
+          from: 1.0; to: 1.2
+          duration: 12000
+          loops: Animation.Infinite
+          easing.type: Easing.SineCurve
+        }
+      }
+      // Scrim so text stays readable on any cover.
+      Rectangle {
+        anchors.fill: parent
+        gradient: Gradient {
+          GradientStop { position: 0.0; color: Util.alpha(Commons.Color.background, root.darkTheme ? 0.45 : 0.35) }
+          GradientStop { position: 0.55; color: Util.alpha(Commons.Color.background, root.darkTheme ? 0.72 : 0.6) }
+          GradientStop { position: 1.0; color: Util.alpha(Commons.Color.background, root.darkTheme ? 0.88 : 0.8) }
+        }
+      }
+    }
+    Item {
+      id: backdropMask
+      anchors.fill: backdrop
+      layer.enabled: true
+      visible: false
+      Rectangle { anchors.fill: parent; radius: Style.cornerRadius }
+    }
+
     Column {
       id: content
       width: parent.width
       spacing: Style.space(14)
 
-      // ---- Header -----------------------------------------------------
-      Item {
+      // ---- Stage: cover on the front, lyrics on the back ------------------
+      Flipable {
+        id: stage
         width: parent.width
-        implicitHeight: Math.max(headIcon.implicitHeight, headLabels.implicitHeight)
+        height: Math.round(width * 0.9)
+        readonly property bool flipped: root.lyricsOn
 
-        Text {
-          id: headIcon
-          anchors.left: parent.left
-          anchors.verticalCenter: parent.verticalCenter
-          text: "󰓇"
-          color: root.spotifyGreen
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.display
+        transform: Rotation {
+          origin.x: stage.width / 2
+          origin.y: stage.height / 2
+          axis { x: 0; y: 1; z: 0 }
+          angle: stage.flipped ? 180 : 0
+          Behavior on angle { NumberAnimation { duration: 620; easing.type: Easing.OutBack; easing.overshoot: 0.9 } }
         }
-        Column {
-          id: headLabels
-          anchors.left: headIcon.right
-          anchors.leftMargin: Style.space(12)
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(2)
-          Text {
-            text: "Spotify"
-            color: root.panelFg
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.title
-            font.bold: true
-          }
-          Row {
-            spacing: Style.space(6)
-            Rectangle {
-              width: Style.space(6); height: width; radius: width / 2
-              anchors.verticalCenter: parent.verticalCenter
-              color: root.playing ? root.animatedAccent : Util.alpha(root.panelFg, 0.4)
-              SequentialAnimation on opacity {
-                running: root.playing && root.popupOpen
-                loops: Animation.Infinite
-                onRunningChanged: if (!running) parent.opacity = 1
-                NumberAnimation { to: 0.25; duration: 700; easing.type: Easing.InOutSine }
-                NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutSine }
-              }
-            }
-            Text {
-              text: root.playing ? "NOW PLAYING" : "PAUSED"
-              color: Util.alpha(root.panelFg, 0.6)
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              font.bold: true
-              font.letterSpacing: 1.2
-            }
-          }
-        }
-        Text {
-          anchors.right: parent.right
-          anchors.verticalCenter: parent.verticalCenter
-          visible: root.running && root.player.shuffle
-          text: "󰒝  shuffle"
-          color: Util.alpha(root.animatedAccent, 0.9)
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-      }
 
-      // ---- Hero: art + track over a blurred cover -----------------------
-      Item {
-        id: hero
-        width: parent.width
-        height: Style.space(124)
-
-        Rectangle {
-          id: heroBg
+        front: Item {
+          id: front
           anchors.fill: parent
-          radius: Math.max(Style.cornerRadius, Style.space(10))
-          color: Util.alpha(root.animatedAccent, 0.10)
-          border.width: 1
-          border.color: Util.alpha(root.animatedAccent, 0.22)
-          clip: true
 
-          Image {
-            id: backdropSrc
-            anchors.fill: parent
-            source: root.popupOpen && root.blurBackdrop ? root.artUrl : ""
-            sourceSize: Qt.size(96, 96)
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
+          readonly property real coverSize: Math.min(width, height) - Style.space(16)
+          readonly property real coverRadius: Math.max(Style.cornerRadius, Style.space(14))
+
+          // Colored glow under the cover.
+          Rectangle {
+            id: glowSrc
+            anchors.centerIn: cover
+            anchors.verticalCenterOffset: Style.space(10)
+            width: cover.width * 0.86
+            height: cover.height * 0.86
+            radius: front.coverRadius
+            color: root.animatedAccent
             visible: false
           }
           MultiEffect {
-            anchors.fill: parent
-            anchors.margins: -Style.space(20)
-            source: backdropSrc
-            visible: backdropSrc.status === Image.Ready
+            anchors.fill: glowSrc
+            anchors.margins: -Style.space(30)
+            source: glowSrc
+            autoPaddingEnabled: true
             blurEnabled: true
             blur: 1.0
             blurMax: 48
-            saturation: 0.15
-            brightness: root.darkTheme ? -0.42 : 0.35
-            opacity: 0.85
-            // Slow drift keeps the backdrop alive without a timer.
-            NumberAnimation on scale {
-              running: root.popupOpen && root.playing
-              from: 1.0; to: 1.15
-              duration: 9000
-              loops: Animation.Infinite
-              easing.type: Easing.SineCurve
-            }
+            opacity: root.playing ? 0.55 : 0.2
+            scale: cover.scale
+            Behavior on opacity { NumberAnimation { duration: 500 } }
           }
-        }
 
-        Row {
-          id: heroRow
-          anchors.fill: parent
-          anchors.margins: Style.space(14)
-          spacing: Style.space(16)
-
-          // Cover with a progress ring.
+          // The cover: crossfades between two images on track change, and
+          // breathes back a little while paused.
           Item {
-            id: artBox
-            width: hero.height - Style.space(28)
+            id: cover
+            anchors.centerIn: parent
+            width: front.coverSize
             height: width
-            anchors.verticalCenter: parent.verticalCenter
+            scale: root.playing ? 1 : 0.88
+            Behavior on scale { NumberAnimation { duration: 520; easing.type: Easing.OutBack; easing.overshoot: 1.6 } }
+            layer.enabled: true
+            layer.effect: MultiEffect {
+              maskEnabled: true
+              maskSource: coverMask
+            }
 
-            Shape {
-              anchors.fill: parent
-              anchors.margins: -Style.space(5)
-              preferredRendererType: Shape.CurveRenderer
-              ShapePath {
-                strokeColor: Util.alpha(root.panelFg, 0.10)
-                strokeWidth: Math.max(2, Style.space(3))
-                fillColor: "transparent"
-                capStyle: ShapePath.RoundCap
-                PathAngleArc {
-                  centerX: artBox.width / 2 + Style.space(5); centerY: centerX
-                  radiusX: artBox.width / 2 + Style.space(3); radiusY: radiusX
-                  startAngle: -90; sweepAngle: 360
-                }
-              }
-              ShapePath {
-                strokeColor: root.animatedAccent
-                strokeWidth: Math.max(2, Style.space(3))
-                fillColor: "transparent"
-                capStyle: ShapePath.RoundCap
-                PathAngleArc {
-                  centerX: artBox.width / 2 + Style.space(5); centerY: centerX
-                  radiusX: artBox.width / 2 + Style.space(3); radiusY: radiusX
-                  startAngle: -90
-                  sweepAngle: 360 * root.progress
-                  Behavior on sweepAngle { NumberAnimation { duration: 250 } }
-                }
-              }
+            property bool showA: true
+            property string wanted: root.popupOpen ? root.artUrl : ""
+            onWantedChanged: {
+              var next = showA ? imgB : imgA
+              if (wanted === "" || next.source.toString() === wanted) return
+              next.source = wanted
+            }
+            function settle(img) {
+              if (img.status !== Image.Ready || img.source.toString() !== wanted) return
+              showA = img === imgA
             }
 
             Rectangle {
-              id: art
               anchors.fill: parent
-              anchors.margins: Style.space(2)
-              radius: width / 2
               color: Util.alpha(root.panelFg, 0.08)
-              clip: true
-              layer.enabled: true
-              layer.effect: MultiEffect {
-                maskEnabled: true
-                maskSource: artMask
-              }
-
-              Image {
-                id: cover
-                anchors.fill: parent
-                source: root.popupOpen ? root.artUrl : ""
-                sourceSize: Qt.size(256, 256)
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                cache: true
-              }
               Text {
                 anchors.centerIn: parent
-                visible: cover.status !== Image.Ready
                 text: "󰝚"
-                color: Util.alpha(root.panelFg, 0.5)
+                color: Util.alpha(root.panelFg, 0.4)
                 font.family: root.fontFamily
-                font.pixelSize: Style.font.display
-              }
-
-              // Vinyl-style slow spin while playing.
-              RotationAnimation on rotation {
-                running: root.popupOpen && root.playing
-                from: art.rotation; to: art.rotation + 360
-                duration: 24000
-                loops: Animation.Infinite
+                font.pixelSize: Style.font.displayLarge * 2
               }
             }
-            Item {
-              id: artMask
-              anchors.fill: art
-              layer.enabled: true
-              visible: false
-              Rectangle { anchors.fill: parent; radius: width / 2 }
+            Image {
+              id: imgA
+              anchors.fill: parent
+              sourceSize: Qt.size(512, 512)
+              fillMode: Image.PreserveAspectCrop
+              asynchronous: true
+              opacity: cover.showA && status === Image.Ready ? 1 : 0
+              Behavior on opacity { NumberAnimation { duration: 450; easing.type: Easing.InOutQuad } }
+              onStatusChanged: cover.settle(imgA)
             }
-            // Spindle hole, for the record look.
-            Rectangle {
-              anchors.centerIn: parent
-              width: Style.space(10); height: width; radius: width / 2
-              color: Commons.Color.background
-              border.width: 1
-              border.color: Util.alpha(root.animatedAccent, 0.6)
+            Image {
+              id: imgB
+              anchors.fill: parent
+              sourceSize: Qt.size(512, 512)
+              fillMode: Image.PreserveAspectCrop
+              asynchronous: true
+              opacity: !cover.showA && status === Image.Ready ? 1 : 0
+              Behavior on opacity { NumberAnimation { duration: 450; easing.type: Easing.InOutQuad } }
+              onStatusChanged: cover.settle(imgB)
             }
           }
+          Item {
+            id: coverMask
+            anchors.fill: cover
+            layer.enabled: true
+            visible: false
+            Rectangle { anchors.fill: parent; radius: front.coverRadius }
+          }
 
-          Column {
-            id: trackInfo
-            width: heroRow.width - artBox.width - heroRow.spacing
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(3)
-
-            Text {
-              id: tTitle
-              width: parent.width
-              text: root.title || "Nothing playing"
-              textFormat: Text.PlainText
-              maximumLineCount: 2
-              wrapMode: Text.Wrap
-              elide: Text.ElideRight
-              color: root.panelFg
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.subtitle + Style.space(2)
-              font.bold: true
-            }
-            Text {
-              id: tArtist
-              width: parent.width
-              text: root.artist
-              textFormat: Text.PlainText
-              elide: Text.ElideRight
-              color: root.animatedAccent
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
-            Text {
-              id: tAlbum
-              width: parent.width
-              text: root.album
-              visible: text !== ""
-              textFormat: Text.PlainText
-              elide: Text.ElideRight
-              color: Util.alpha(root.panelFg, 0.55)
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-            }
+          // Double-click the cover for lyrics.
+          MouseArea {
+            anchors.fill: cover
+            cursorShape: Qt.PointingHandCursor
+            onDoubleClicked: root.lyricsOn = true
           }
         }
 
-        // Track change: cover pops, text cascades in.
-        SequentialAnimation {
-          id: heroSwap
-          ParallelAnimation {
-            NumberAnimation { target: artBox; property: "scale"; from: 0.86; to: 1; duration: 520; easing.type: Easing.OutBack; easing.overshoot: 2 }
-            NumberAnimation { target: tTitle; property: "opacity"; from: 0; to: 1; duration: 260 }
-            NumberAnimation { target: tTitle; property: "x"; from: Style.space(14); to: 0; duration: 360; easing.type: Easing.OutCubic }
-            SequentialAnimation {
-              PauseAnimation { duration: 70 }
-              ParallelAnimation {
-                NumberAnimation { target: tArtist; property: "opacity"; from: 0; to: 1; duration: 260 }
-                NumberAnimation { target: tArtist; property: "x"; from: Style.space(14); to: 0; duration: 360; easing.type: Easing.OutCubic }
+        back: Item {
+          id: back
+          anchors.fill: parent
+
+          Rectangle {
+            anchors.fill: parent
+            anchors.margins: Style.space(4)
+            radius: Math.max(Style.cornerRadius, Style.space(14))
+            color: Util.alpha(root.animatedAccent, 0.08)
+            border.width: 1
+            border.color: Util.alpha(root.animatedAccent, 0.18)
+          }
+
+          // Lines fade out toward the top and bottom edges.
+          Item {
+            id: lyricsArea
+            anchors.fill: parent
+            anchors.margins: Style.space(18)
+            layer.enabled: true
+            layer.effect: MultiEffect {
+              maskEnabled: true
+              maskSource: fadeMask
+              maskThresholdMin: 0.0
+              maskSpreadAtMin: 1.0
+            }
+
+            ListView {
+              id: lyricsView
+              anchors.fill: parent
+              interactive: false
+              model: stage.flipped || root.lyricsOn ? root.lyricLines : []
+              currentIndex: Math.max(0, root.lyricIdx)
+              preferredHighlightBegin: height * 0.36
+              preferredHighlightEnd: height * 0.36 + Style.space(30)
+              highlightRangeMode: ListView.StrictlyEnforceRange
+              highlightMoveDuration: 520
+              highlightMoveVelocity: -1
+              visible: root.lyricLines.length > 0
+              spacing: Style.space(4)
+
+              delegate: Item {
+                id: line
+                required property var modelData
+                required property int index
+                readonly property bool current: index === root.lyricIdx
+                readonly property int dist: Math.abs(index - Math.max(0, root.lyricIdx))
+                width: lyricsView.width
+                height: lineText.implicitHeight + Style.space(8)
+
+                Text {
+                  id: lineText
+                  width: parent.width
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: line.modelData.text
+                  textFormat: Text.PlainText
+                  wrapMode: Text.WordWrap
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.title + Style.space(3)
+                  font.bold: true
+                  color: line.current ? root.panelFg : Util.alpha(root.panelFg, 0.9)
+                  opacity: line.current ? 1 : Math.max(0.16, 0.5 - line.dist * 0.1)
+                  scale: line.current ? 1 : 0.92
+                  transformOrigin: Item.Left
+                  Behavior on opacity { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
+                  Behavior on scale { NumberAnimation { duration: 420; easing.type: Easing.OutBack; easing.overshoot: 1.4 } }
+                }
+
+                // Click a line to jump there.
+                MouseArea {
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: root.seekTo(line.modelData.t)
+                  onEntered: if (!line.current) lineText.opacity = 0.75
+                  onExited: lineText.opacity = Qt.binding(function() { return line.current ? 1 : Math.max(0.16, 0.5 - line.dist * 0.1) })
+                }
               }
             }
-            SequentialAnimation {
-              PauseAnimation { duration: 140 }
-              ParallelAnimation {
-                NumberAnimation { target: tAlbum; property: "opacity"; from: 0; to: 1; duration: 260 }
-                NumberAnimation { target: tAlbum; property: "x"; from: Style.space(14); to: 0; duration: 360; easing.type: Easing.OutCubic }
+          }
+          Item {
+            id: fadeMask
+            anchors.fill: lyricsArea
+            layer.enabled: true
+            visible: false
+            Rectangle {
+              anchors.fill: parent
+              gradient: Gradient {
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.16; color: "white" }
+                GradientStop { position: 0.8; color: "white" }
+                GradientStop { position: 1.0; color: "transparent" }
               }
+            }
+          }
+
+          // Empty / loading states.
+          Column {
+            anchors.centerIn: parent
+            spacing: Style.space(10)
+            visible: root.lyricLines.length === 0
+
+            Row {
+              anchors.horizontalCenter: parent.horizontalCenter
+              spacing: Style.space(6)
+              visible: root.lyricsStatus === "loading"
+              Repeater {
+                model: 3
+                Rectangle {
+                  width: Style.space(8); height: width; radius: width / 2
+                  color: root.animatedAccent
+                  SequentialAnimation on scale {
+                    running: root.lyricsStatus === "loading" && root.popupOpen
+                    loops: Animation.Infinite
+                    PauseAnimation { duration: index * 140 }
+                    NumberAnimation { from: 0.5; to: 1.2; duration: 300; easing.type: Easing.OutQuad }
+                    NumberAnimation { to: 0.5; duration: 300; easing.type: Easing.InQuad }
+                    PauseAnimation { duration: (2 - index) * 140 }
+                  }
+                }
+              }
+            }
+            Text {
+              anchors.horizontalCenter: parent.horizontalCenter
+              visible: root.lyricsStatus !== "loading"
+              text: "󰍡"
+              color: Util.alpha(root.panelFg, 0.35)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.displayLarge
+            }
+            Text {
+              anchors.horizontalCenter: parent.horizontalCenter
+              text: root.lyricsStatus === "loading" ? "Finding lyrics"
+                : root.lyricsStatus === "error" ? "Couldn't reach lrclib.net"
+                : "No synced lyrics for this song"
+              color: Util.alpha(root.panelFg, 0.55)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
             }
           }
         }
       }
 
-      // ---- Seek ---------------------------------------------------------
+      // ---- Title / artist ----------------------------------------------
+      Item {
+        id: info
+        width: parent.width
+        height: infoCol.implicitHeight
+
+        Column {
+          id: infoCol
+          width: parent.width - miniEq.width - Style.space(12)
+          spacing: Style.space(3)
+
+          Text {
+            id: tTitle
+            width: parent.width
+            text: root.title || "Nothing playing"
+            textFormat: Text.PlainText
+            elide: Text.ElideRight
+            color: root.panelFg
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.title + Style.space(4)
+            font.bold: true
+          }
+          Text {
+            id: tArtist
+            width: parent.width
+            text: root.artist + (root.album && root.album !== root.title ? "  ·  " + root.album : "")
+            textFormat: Text.PlainText
+            elide: Text.ElideRight
+            color: Util.alpha(root.panelFg, 0.62)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+          }
+        }
+
+        // Little live equalizer where a like button would go.
+        Item {
+          id: miniEq
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          width: Style.space(18)
+          height: Style.space(16)
+          property real phase: 0
+          NumberAnimation on phase {
+            from: 0; to: 1
+            duration: 1100
+            loops: Animation.Infinite
+            running: root.playing && root.popupOpen
+          }
+          Repeater {
+            model: 4
+            Rectangle {
+              readonly property real wave: Math.abs(Math.sin((miniEq.phase + index * 0.29) * Math.PI * (2 + index * 0.5)))
+              x: index * (miniEq.width / 4)
+              width: Math.max(2, Math.round(miniEq.width / 4) - 2)
+              radius: width / 2
+              anchors.bottom: parent.bottom
+              height: root.playing ? miniEq.height * (0.25 + 0.75 * wave) : miniEq.height * 0.2
+              color: root.animatedAccent
+              Behavior on height { enabled: !root.playing; NumberAnimation { duration: 220 } }
+            }
+          }
+        }
+      }
+
+      // ---- Seek -----------------------------------------------------------
       Column {
+        id: seek
         width: parent.width
         spacing: Style.space(2)
-        visible: root.duration > 0
-        PanelSlider {
+        opacity: root.duration > 0 ? 1 : 0.4
+
+        PulseSlider {
           width: parent.width
-          bar: root.bar
-          minimum: 0
-          maximum: Math.max(1, root.duration)
           value: root.position
-          step: 5
-          enabled: root.running && root.player.canSeek
-          fillColor: root.animatedAccent
-          knobColor: root.animatedAccent
+          maximum: Math.max(1, root.duration)
+          fill: root.animatedAccent
+          track: Util.alpha(root.panelFg, 0.15)
+          enabled: root.running && root.player.canSeek && root.duration > 0
           onReleased: function(v) { root.seekTo(v) }
         }
         Item {
@@ -765,74 +878,86 @@ BarWidget {
           Text {
             id: elapsed
             text: Model.timestamp(root.position)
-            color: Util.alpha(root.panelFg, 0.6)
+            color: Util.alpha(root.panelFg, 0.55)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
           }
           Text {
             anchors.right: parent.right
             text: "-" + Model.timestamp(root.duration - root.position)
-            color: Util.alpha(root.panelFg, 0.6)
+            color: Util.alpha(root.panelFg, 0.55)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
           }
         }
       }
 
-      // ---- Transport ----------------------------------------------------
+      // ---- Transport ------------------------------------------------------
       Item {
+        id: transport
         width: parent.width
-        implicitHeight: playBtn.height
+        height: playBtn.height
+
+        PulseIconButton {
+          anchors.left: parent.left
+          anchors.verticalCenter: parent.verticalCenter
+          icon: "󰒝"
+          size: Style.font.icon + Style.space(2)
+          color: root.panelFg
+          accent: root.animatedAccent
+          fontFamily: root.fontFamily
+          active: root.running && root.player.shuffle
+          enabled: root.running && root.player.shuffleSupported
+          onClicked: root.toggleShuffle()
+        }
 
         Row {
           anchors.centerIn: parent
-          spacing: Style.space(14)
+          spacing: Style.space(18)
 
-          Button {
+          PulseIconButton {
             anchors.verticalCenter: parent.verticalCenter
-            iconText: "󰒝"
-            tooltipText: "Shuffle · S"
-            foreground: root.running && root.player.shuffle ? root.animatedAccent : root.panelFg
+            icon: "󰒮"
+            size: Style.font.iconLarge + Style.space(4)
+            color: root.panelFg
             accent: root.animatedAccent
-            selected: root.running && root.player.shuffle
-            enabled: root.running && root.player.shuffleSupported
-            opacity: enabled ? 1 : 0.35
-            onClicked: root.toggleShuffle()
-          }
-          Button {
-            anchors.verticalCenter: parent.verticalCenter
-            iconText: "󰒮"
-            tooltipText: "Previous · P"
-            foreground: root.panelFg
-            accent: root.animatedAccent
-            iconSize: Style.font.iconLarge
+            fontFamily: root.fontFamily
             enabled: root.running && (root.player.canGoPrevious || root.player.canSeek)
-            opacity: enabled ? 1 : 0.35
             onClicked: root.previous()
           }
 
-          // Big play button: accent disc that squishes on press.
+          // Play: accent disc that squishes on press and morphs its glyph.
           Rectangle {
             id: playBtn
-            width: Style.space(54)
+            width: Style.space(58)
             height: width
             radius: width / 2
             anchors.verticalCenter: parent.verticalCenter
             color: root.animatedAccent
-            scale: playMouse.pressed ? 0.88 : (playMouse.containsMouse ? 1.06 : 1)
-            Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutBack; easing.overshoot: 3 } }
+            scale: playMouse.pressed ? 0.86 : (playMouse.containsMouse ? 1.07 : 1)
+            Behavior on scale { NumberAnimation { duration: 240; easing.type: Easing.OutBack; easing.overshoot: 3 } }
 
-            // Soft glow ring.
+            // Pulse ring while playing.
             Rectangle {
+              id: pulseRing
               z: -1
               anchors.centerIn: parent
-              width: parent.width + Style.space(12)
+              width: parent.width
               height: width
               radius: width / 2
               color: "transparent"
-              border.width: Style.space(6)
-              border.color: Util.alpha(root.animatedAccent, root.playing ? 0.22 : 0.10)
-              Behavior on border.color { ColorAnimation { duration: 300 } }
+              border.width: Style.space(2)
+              border.color: root.animatedAccent
+              opacity: 0
+              SequentialAnimation {
+                running: root.playing && root.popupOpen
+                loops: Animation.Infinite
+                onRunningChanged: if (!running) { pulseRing.opacity = 0; pulseRing.scale = 1 }
+                ParallelAnimation {
+                  NumberAnimation { target: pulseRing; property: "scale"; from: 1; to: 1.45; duration: 1600; easing.type: Easing.OutCubic }
+                  NumberAnimation { target: pulseRing; property: "opacity"; from: 0.5; to: 0; duration: 1600; easing.type: Easing.OutCubic }
+                }
+              }
             }
 
             Text {
@@ -842,12 +967,15 @@ BarWidget {
               text: root.playing ? "󰏤" : "󰐊"
               color: Commons.Color.background
               font.family: root.fontFamily
-              font.pixelSize: Style.font.iconLarge + Style.space(6)
+              font.pixelSize: Style.font.iconLarge + Style.space(8)
               onTextChanged: glyphMorph.restart()
             }
             SequentialAnimation {
               id: glyphMorph
-              NumberAnimation { target: playGlyph; property: "scale"; from: 0.4; to: 1.12; duration: 160; easing.type: Easing.OutQuad }
+              ParallelAnimation {
+                NumberAnimation { target: playGlyph; property: "scale"; from: 0.3; to: 1.15; duration: 180; easing.type: Easing.OutQuad }
+                NumberAnimation { target: playGlyph; property: "rotation"; from: -90; to: 0; duration: 260; easing.type: Easing.OutBack }
+              }
               NumberAnimation { target: playGlyph; property: "scale"; to: 1; duration: 140; easing.type: Easing.OutQuad }
             }
 
@@ -860,180 +988,159 @@ BarWidget {
             }
           }
 
-          Button {
+          PulseIconButton {
             anchors.verticalCenter: parent.verticalCenter
-            iconText: "󰒭"
-            tooltipText: "Next · N"
-            foreground: root.panelFg
+            icon: "󰒭"
+            size: Style.font.iconLarge + Style.space(4)
+            color: root.panelFg
             accent: root.animatedAccent
-            iconSize: Style.font.iconLarge
+            fontFamily: root.fontFamily
             enabled: root.running && root.player.canGoNext
-            opacity: enabled ? 1 : 0.35
             onClicked: root.next()
           }
-          Button {
-            readonly property int loop: root.running ? root.player.loopState : MprisLoopState.None
-            anchors.verticalCenter: parent.verticalCenter
-            iconText: loop === MprisLoopState.Track ? "󰑘" : "󰑖"
-            tooltipText: loop === MprisLoopState.Track ? "Repeat one · R" : (loop === MprisLoopState.Playlist ? "Repeat all · R" : "Repeat off · R")
-            foreground: loop !== MprisLoopState.None ? root.animatedAccent : root.panelFg
-            accent: root.animatedAccent
-            selected: loop !== MprisLoopState.None
-            enabled: root.running && root.player.loopSupported
-            opacity: enabled ? 1 : 0.35
-            onClicked: root.cycleRepeat()
-          }
+        }
+
+        PulseIconButton {
+          readonly property int loop: root.running ? root.player.loopState : MprisLoopState.None
+          anchors.right: parent.right
+          anchors.verticalCenter: parent.verticalCenter
+          icon: loop === MprisLoopState.Track ? "󰑘" : "󰑖"
+          size: Style.font.icon + Style.space(2)
+          color: root.panelFg
+          accent: root.animatedAccent
+          fontFamily: root.fontFamily
+          active: loop !== MprisLoopState.None
+          enabled: root.running && root.player.loopSupported
+          onClicked: root.cycleRepeat()
         }
       }
 
-      // ---- Volume -------------------------------------------------------
-      Row {
+      // ---- Volume ---------------------------------------------------------
+      Item {
         width: parent.width
-        spacing: Style.space(10)
+        height: volSlider.implicitHeight
         visible: root.running && root.player.volumeSupported
 
+        readonly property real v: root.running ? root.player.volume : 0
+        property real restore: 0.5
+
         Text {
-          id: volIcon
+          id: volLow
+          anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          readonly property real v: root.running ? root.player.volume : 0
-          text: v <= 0.001 ? "󰝟" : (v < 0.34 ? "󰕿" : (v < 0.67 ? "󰖀" : "󰕾"))
-          color: Util.alpha(root.panelFg, 0.75)
+          text: parent.v <= 0.001 ? "󰝟" : "󰕿"
+          color: Util.alpha(root.panelFg, 0.55)
           font.family: root.fontFamily
           font.pixelSize: Style.font.icon
           MouseArea {
             anchors.fill: parent
+            anchors.margins: -Style.space(4)
             cursorShape: Qt.PointingHandCursor
-            property real restore: 0.5
             onClicked: {
-              if (volIcon.v > 0.001) { restore = volIcon.v; root.setVolume(0) }
-              else root.setVolume(restore)
+              var item = parent.parent
+              if (item.v > 0.001) { item.restore = item.v; root.setVolume(0) }
+              else root.setVolume(item.restore)
             }
           }
         }
-        PanelSlider {
-          width: parent.width - volIcon.width - volPct.width - parent.spacing * 2
+        PulseSlider {
+          id: volSlider
+          anchors.left: volLow.right
+          anchors.right: volHigh.left
+          anchors.leftMargin: Style.space(12)
+          anchors.rightMargin: Style.space(12)
           anchors.verticalCenter: parent.verticalCenter
-          bar: root.bar
-          minimum: 0
+          value: parent.v
           maximum: 1
-          step: 0.05
-          value: root.running ? root.player.volume : 0
-          fillColor: root.animatedAccent
-          knobColor: root.animatedAccent
+          live: true
+          fill: Util.alpha(root.panelFg, 0.8)
+          track: Util.alpha(root.panelFg, 0.15)
           onMoved: function(v) { root.setVolume(v) }
           onReleased: function(v) { root.setVolume(v) }
         }
         Text {
-          id: volPct
-          width: Style.space(36)
-          horizontalAlignment: Text.AlignRight
-          anchors.verticalCenter: parent.verticalCenter
-          text: Math.round((root.running ? root.player.volume : 0) * 100) + "%"
-          color: Util.alpha(root.panelFg, 0.6)
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-        }
-      }
-
-      // ---- Lyrics -------------------------------------------------------
-      Item {
-        id: lyricsBox
-        width: parent.width
-        height: root.lyricsOn ? Style.space(96) : 0
-        clip: true
-        visible: height > 0
-        Behavior on height { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
-
-        Rectangle {
-          anchors.fill: parent
-          radius: Math.max(Style.cornerRadius, Style.space(8))
-          color: Util.alpha(root.animatedAccent, 0.07)
-          border.width: 1
-          border.color: Util.alpha(root.animatedAccent, 0.15)
-        }
-
-        ListView {
-          id: lyricsView
-          anchors.fill: parent
-          anchors.margins: Style.space(8)
-          clip: true
-          interactive: false
-          model: root.lyricLines
-          currentIndex: Math.max(0, root.lyricIdx)
-          preferredHighlightBegin: height / 2 - Style.space(12)
-          preferredHighlightEnd: height / 2 + Style.space(12)
-          highlightRangeMode: ListView.StrictlyEnforceRange
-          highlightMoveDuration: 420
-          visible: root.lyricLines.length > 0
-          delegate: Text {
-            required property var modelData
-            required property int index
-            readonly property bool current: index === root.lyricIdx
-            width: lyricsView.width
-            horizontalAlignment: Text.AlignHCenter
-            text: modelData.text
-            textFormat: Text.PlainText
-            elide: Text.ElideRight
-            color: current ? root.animatedAccent : Util.alpha(root.panelFg, 0.4)
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            font.bold: current
-            scale: current ? 1.06 : 1
-            height: Style.space(24)
-            verticalAlignment: Text.AlignVCenter
-            Behavior on scale { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-            Behavior on color { ColorAnimation { duration: 260 } }
-          }
-        }
-
-        Text {
-          anchors.centerIn: parent
-          visible: root.lyricLines.length === 0
-          text: root.lyricsStatus === "loading" ? "Finding lyrics…"
-            : root.lyricsStatus === "error" ? "Couldn't reach lrclib.net"
-            : "No synced lyrics for this song"
-          color: Util.alpha(root.panelFg, 0.5)
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.bodySmall
-        }
-      }
-
-      PanelSeparator { foreground: root.panelFg }
-
-      // ---- Footer -------------------------------------------------------
-      Item {
-        width: parent.width
-        implicitHeight: lyricsBtn.implicitHeight
-
-        Button {
-          id: lyricsBtn
-          anchors.left: parent.left
-          anchors.verticalCenter: parent.verticalCenter
-          iconText: "󰍡"
-          text: "Lyrics"
-          tooltipText: "Synced lyrics from lrclib.net · L"
-          fontSize: Style.font.bodySmall
-          foreground: root.lyricsOn ? root.animatedAccent : root.panelFg
-          accent: root.animatedAccent
-          selected: root.lyricsOn
-          focusable: true
-          onClicked: root.lyricsOn = !root.lyricsOn
-        }
-        Button {
+          id: volHigh
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          iconText: "󰓇"
-          text: "Open Spotify"
-          fontSize: Style.font.bodySmall
-          foreground: root.panelFg
+          text: "󰕾"
+          color: Util.alpha(root.panelFg, 0.55)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.icon
+        }
+      }
+
+      // ---- Footer ---------------------------------------------------------
+      Item {
+        width: parent.width
+        height: lyricsChip.implicitHeight
+
+        PulseChip {
+          id: lyricsChip
+          anchors.left: parent.left
+          icon: root.lyricsOn ? "󰐻" : "󰍡"
+          label: root.lyricsOn ? "Cover" : "Lyrics"
+          fg: root.panelFg
           accent: root.animatedAccent
-          focusable: true
+          fontFamily: root.fontFamily
+          active: root.lyricsOn
+          onClicked: root.lyricsOn = !root.lyricsOn
+        }
+        PulseChip {
+          anchors.right: parent.right
+          icon: "󰓇"
+          label: "Open Spotify"
+          fg: root.panelFg
+          accent: root.spotifyGreen
+          fontFamily: root.fontFamily
           onClicked: { root.launch(); root.close() }
+        }
+      }
+    }
+
+  }
+
+  // ---- Motion -----------------------------------------------------------
+
+  // Opening: the stage pops in, then the rest cascades up.
+  ParallelAnimation {
+    id: introAnim
+    NumberAnimation { target: stage; property: "opacity"; from: 0; to: 1; duration: 260 }
+    NumberAnimation { target: stage; property: "scale"; from: 0.9; to: 1; duration: 560; easing.type: Easing.OutBack; easing.overshoot: 1.4 }
+    SequentialAnimation {
+      PauseAnimation { duration: 80 }
+      ParallelAnimation {
+        NumberAnimation { target: info; property: "opacity"; from: 0; to: 1; duration: 300 }
+        NumberAnimation { target: info; property: "y"; from: info.y + Style.space(14); to: info.y; duration: 420; easing.type: Easing.OutCubic }
+      }
+    }
+    SequentialAnimation {
+      PauseAnimation { duration: 150 }
+      NumberAnimation { target: seek; property: "opacity"; from: 0; to: root.duration > 0 ? 1 : 0.4; duration: 300 }
+    }
+    SequentialAnimation {
+      PauseAnimation { duration: 210 }
+      ParallelAnimation {
+        NumberAnimation { target: transport; property: "opacity"; from: 0; to: 1; duration: 300 }
+        NumberAnimation { target: transport; property: "scale"; from: 0.92; to: 1; duration: 420; easing.type: Easing.OutBack; easing.overshoot: 2 }
+      }
+    }
+  }
+
+  // Track change: title and artist slide in one after the other.
+  SequentialAnimation {
+    id: trackAnim
+    ParallelAnimation {
+      NumberAnimation { target: tTitle; property: "opacity"; from: 0; to: 1; duration: 320 }
+      NumberAnimation { target: tTitle; property: "x"; from: Style.space(18); to: 0; duration: 440; easing.type: Easing.OutCubic }
+      SequentialAnimation {
+        PauseAnimation { duration: 90 }
+        ParallelAnimation {
+          NumberAnimation { target: tArtist; property: "opacity"; from: 0; to: 1; duration: 320 }
+          NumberAnimation { target: tArtist; property: "x"; from: Style.space(18); to: 0; duration: 440; easing.type: Easing.OutCubic }
         }
       }
     }
   }
 
-  // Opening the card replays the hero entrance once.
-  onPopupOpenChanged: if (popupOpen) { heroSwap.restart(); if (running) player.positionChanged() }
+  onPopupOpenChanged: if (popupOpen) { introAnim.restart(); if (running) player.positionChanged() }
 }

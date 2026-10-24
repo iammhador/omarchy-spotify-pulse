@@ -5,7 +5,7 @@ An animated Spotify player for the [Omarchy](https://omarchy.org) bar.
 **Song — Artist** lives in your bar. Click it for a player card that takes on the colors of whatever's playing.
 
 <p align="center">
-  <img src="assets/demo.gif" alt="Spotify Pulse demo: the bar shows the song and artist; the player card opens with a spinning album cover and progress ring, then the whole card shifts from orange to teal when the track changes" width="440">
+  <img src="assets/demo.gif" alt="Spotify Pulse demo: the player card opens with a large glowing album cover, crossfades to the next track as the whole card shifts from orange to teal, the cover sinks back on pause, and the cover flips over to the lyrics side" width="360">
 </p>
 
 ## Features
@@ -18,13 +18,25 @@ An animated Spotify player for the [Omarchy](https://omarchy.org) bar.
 - Hides itself when Spotify isn't running
 
 **In the card**
-- **Album-color theme:** the accent, glow, sliders and play button take their color from the cover, and fade smoothly between tracks
-- Spinning, record-style cover with a progress ring and a blurred cover backdrop
-- Draggable seek bar with elapsed and remaining time
-- Shuffle · previous · play/pause · next · repeat (off → all → one)
-- Spotify volume slider (click the speaker icon to mute)
-- **Synced lyrics** from [lrclib.net](https://lrclib.net), with the current line highlighted and scrolling with the song (opt-in, see Privacy)
+- **Cover-first design:** a big album cover glowing in its own color, over a blurred copy of itself that tints the whole card
+- **Album-color theme:** the accent, glow, seek bar and play button take their color from the cover, and fade smoothly between tracks
+- **Motion that means something:**
+  - The cover crossfades on track change.
+  - The cover sinks back when paused and springs forward on play.
+  - The play button pulses while music plays and morphs between ⏯ states.
+  - Controls cascade in when the card opens.
+- **Synced lyrics on the back of the cover:**
+  - Hit **Lyrics** (or double-click the cover) and the cover flips over.
+  - The current line is big and bright, and the lines around it fade away toward the edges.
+  - Click any line to jump to it.
+  - Lyrics come from [lrclib.net](https://lrclib.net) and are opt-in (see Privacy).
+- Thin seek and volume sliders that grow when you hover them, and work with drag or scroll
+- Shuffle and repeat (off → all → one), with an accent dot when on
 - Keyboard shortcuts: `Space` play/pause · `←/→` seek · `↑/↓` volume · `N/P` next/previous · `S` shuffle · `R` repeat · `L` lyrics · `Esc` close
+
+<p align="center">
+  <img src="assets/preview.png" alt="Two cards side by side: an orange sunset cover tints one card warm orange; a teal moon cover tints the other teal" width="520">
+</p>
 
 **In sync with Spotify.** It talks to the desktop app over MPRIS, the standard Linux media-control interface, so changes from the app, media keys, your phone (Spotify Connect) or the card all show up everywhere. No Spotify account, login or API key.
 
@@ -62,7 +74,7 @@ omarchy bar set io.github.iammhador.spotify-pulse scrollAction track
 | `marquee`        | `true`     | Scroll long titles (otherwise cut off with `…`)               |
 | `scrollAction`   | `"volume"` | Mouse wheel on the bar: `"volume"`, `"track"` or `"none"`     |
 | `albumColors`    | `true`     | Theme the card from the album cover                           |
-| `blurBackdrop`   | `true`     | Blurred cover behind the track info                           |
+| `blurBackdrop`   | `true`     | Blurred cover tinting the whole card                          |
 | `showWhenClosed` | `false`    | Show a dim "Open Spotify" button when Spotify isn't running   |
 
 ## Scripting
