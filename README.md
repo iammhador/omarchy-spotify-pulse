@@ -35,7 +35,7 @@ An animated Spotify player for the [Omarchy](https://omarchy.org) bar.
 - Keyboard shortcuts: `Space` play/pause · `←/→` seek · `↑/↓` volume · `N/P` next/previous · `S` shuffle · `R` repeat · `L` lyrics · `Esc` close
 
 <p align="center">
-  <img src="assets/preview.png" alt="Two cards side by side: an orange sunset cover tints one card warm orange; a teal moon cover tints the other teal" width="520">
+  <img src="preview.png" alt="Two cards side by side: an orange sunset cover tints one card warm orange; a teal moon cover tints the other teal" width="520">
 </p>
 
 **In sync with Spotify.** It talks to the desktop app over MPRIS, the standard Linux media-control interface, so changes from the app, media keys, your phone (Spotify Connect) or the card all show up everywhere. No Spotify account, login or API key.
@@ -44,7 +44,11 @@ An animated Spotify player for the [Omarchy](https://omarchy.org) bar.
 
 ## Install
 
-Requires Omarchy 4 (the Quickshell-based `omarchy-shell`) and the Spotify desktop app.
+**Requirements**
+- Omarchy 4, which provides the Quickshell-based `omarchy-shell`.
+- The Spotify desktop app.
+- `curl`, used once per track to cache the album cover for color sampling. It ships with every Omarchy install.
+- No accounts, API keys, sudo or extra services.
 
 ```bash
 omarchy plugin add https://github.com/iammhador/omarchy-spotify-pulse.git --enable
@@ -90,6 +94,15 @@ omarchy-shell spotify-pulse volume 60     # percent
 omarchy-shell spotify-pulse lyrics        # toggle lyrics
 omarchy-shell spotify-pulse status        # JSON: track, position, shuffle, loop, volume, accent…
 ```
+
+## Uninstall
+
+```bash
+omarchy plugin remove io.github.iammhador.spotify-pulse
+rm -rf ~/.cache/spotify-pulse   # optional: cached album covers
+```
+
+If you disabled another Spotify widget for this one, turn it back on with `omarchy plugin enable <its id>`.
 
 ## Privacy
 
