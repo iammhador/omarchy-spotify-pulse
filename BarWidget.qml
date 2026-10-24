@@ -44,12 +44,19 @@ BarWidget {
 
   // ---------------------------------------------------------------- settings
 
-  readonly property int maxWidth: Number(setting("maxWidth", 260))
-  readonly property bool showArtist: setting("showArtist", true) !== false
-  readonly property bool marquee: setting("marquee", true) !== false
-  readonly property bool showWhenClosed: setting("showWhenClosed", false) === true
-  readonly property bool albumColors: setting("albumColors", true) !== false
-  readonly property bool blurBackdrop: setting("blurBackdrop", true) !== false
+  // `omarchy bar set` stores plain strings, so accept "false" / "0" too.
+  function flag(name, fallback) {
+    var v = setting(name, fallback)
+    if (typeof v === "string") return !/^(false|0|no|off)$/i.test(v.trim())
+    return !!v
+  }
+
+  readonly property int maxWidth: Number(setting("maxWidth", 260)) > 0 ? Number(setting("maxWidth", 260)) : 260
+  readonly property bool showArtist: flag("showArtist", true)
+  readonly property bool marquee: flag("marquee", true)
+  readonly property bool showWhenClosed: flag("showWhenClosed", false)
+  readonly property bool albumColors: flag("albumColors", true)
+  readonly property bool blurBackdrop: flag("blurBackdrop", true)
   readonly property string scrollAction: String(setting("scrollAction", "volume"))
 
   // ---------------------------------------------------------------- colors
