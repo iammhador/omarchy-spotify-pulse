@@ -520,15 +520,10 @@ Item {
 
   function setSleep(minutes) {
     restoreVolume()   // turned off or changed mid-fade: back to full volume
-    sleepTimer.stop()
     sleepDeadline = 0
     lastRemaining = 1e9
     sleepMinutes = minutes < 0 ? -1 : Math.max(0, Math.round(minutes))
-    if (sleepMinutes > 0) {
-      sleepDeadline = Date.now() + sleepMinutes * 60000
-      sleepTimer.interval = sleepMinutes * 60000
-      sleepTimer.start()
-    }
+    if (sleepMinutes > 0) sleepDeadline = Date.now() + sleepMinutes * 60000
     now = Date.now()
   }
 
@@ -583,9 +578,17 @@ Item {
   }
   onSleepFadeChanged: if (!sleepFade) restoreVolume()
 
+  // Check the wall clock rather than trusting one long Timer: QML timers run
+  // on the animation clock and drift by seconds over a minute.
   Timer {
-    id: sleepTimer
-    onTriggered: svc.sleepNow()
+    interval: 1000
+    repeat: true
+    running: svc.sleepDeadline > 0
+    onTriggered: {
+      if (Date.now() < svc.sleepDeadline) return
+      if (svc.playing) svc.sleepNow()
+      else svc.setSleep(0)   // already paused: nothing to stop
+    }
   }
 
   // Countdown label, only while someone can see it.
