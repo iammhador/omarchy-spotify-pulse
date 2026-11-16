@@ -11,9 +11,10 @@ An animated Spotify player for the [Omarchy](https://omarchy.org) bar.
 ## Features
 
 **In the bar**
-- `Song — Artist` with a little wave that flows to the music (see [Visualizer](#visualizer))
-- On track change the title slides out and back in, and the new cover peeks in for a few seconds
-- A ring around the wave fills as the song plays (and briefly shows the volume when you scroll)
+- The album cover as a rounded square, with the song's progress drawn **around its four sides** (and the volume, briefly, when you scroll)
+- `Song — Artist` next to it; on track change the title slides out and back in and the new cover pops in
+- Or `barStyle wave`: a little wave that flows to the music inside a progress ring (see [Visualizer](#visualizer))
+- **Hover** for a preview with the cover, title, artist and time left
 - Long titles scroll back and forth smoothly (only while playing)
 - Optional: the line being sung instead of the title (`barLyrics`)
 - A moon shows while a sleep timer is set
@@ -22,12 +23,12 @@ An animated Spotify player for the [Omarchy](https://omarchy.org) bar.
 
 **In the card**
 - **Cover-first design:** a big album cover glowing in its own colors, over a blurred copy of itself that tints the whole card. Or make it a spinning record (`coverStyle vinyl`).
-- **Two-color album theme:** two colors are taken from the cover; the glow, seek bar, play button and equalizer blend between them, and everything fades smoothly between tracks.
+- **Two-color album theme:** two colors are taken from the cover; the glow, seek bar, play button and wave blend between them, and everything fades smoothly between tracks.
 - **Motion that means something:**
   - The cover crossfades on track change.
   - The cover sinks back when paused and springs forward on play.
   - The glow breathes with the bass when the visualizer runs.
-  - The play button pulses while music plays and morphs between ⏯ states.
+  - The play button wears a progress ring, pulses while music plays and morphs between ⏯ states.
   - Controls cascade in when the card opens.
 - **Lyrics on the back of the cover:**
   - Hit **Lyrics** (or double-click the cover) and the cover flips over.
@@ -36,7 +37,9 @@ An animated Spotify player for the [Omarchy](https://omarchy.org) bar.
   - Click any line to jump to it. Timing off? `[` and `]` nudge it by half a second.
   - No synced lyrics? You still get the plain lyrics to scroll through.
   - Lyrics come from [lrclib.net](https://lrclib.net) and are opt-in (see Privacy).
-- **Recently played:** the last tracks as small covers. Hover for the name, click to play it again.
+- **Swipe the cover** left for the next song or right for the previous one: it follows the pointer and flies off, and the next cover glides in.
+- **Seek preview:** hover the seek bar to see the time there, and the lyric line sung at that point when lyrics are on.
+- **Recently played:** the last tracks as small covers. Hover for the name, click to play it again. Today's listening time and song count sit beside it.
 - **Sleep timer:** pause after 15, 30 or 60 minutes, or when the song ends.
 - Long titles scroll in the card too, instead of being cut off.
 - Thin seek and volume sliders that grow when you hover them, and work with drag or scroll.
@@ -91,7 +94,7 @@ omarchy restart shell   # the shell keeps the old version loaded until it restar
 
 ## Visualizer
 
-With `cava` installed, the bar's wave and the card's equalizer follow the real audio levels and the cover's glow breathes with the bass. cava only runs while music plays and is stopped the moment you pause. Without cava (or with `visualizer` off) they fall back to a gentle animation.
+With `cava` installed, the waves in the bar and card follow the real audio levels and the cover's glow breathes with the bass. cava only runs while music plays and is stopped the moment you pause. Without cava (or with `visualizer` off) they fall back to a gentle animation.
 
 cava listens to your system's audio output, so it reacts to whatever is playing, not only Spotify. Nothing is recorded or leaves your machine.
 
@@ -110,8 +113,8 @@ omarchy bar set io.github.iammhador.spotify-pulse barLyrics true
 | `showArtist`     | `true`     | Show `— Artist` after the song name                                 |
 | `marquee`        | `true`     | Scroll long titles (otherwise cut off with `…`)                     |
 | `scrollAction`   | `"volume"` | Mouse wheel on the bar: `"volume"`, `"track"` or `"none"`           |
-| `pillCover`      | `"peek"`   | Cover in the bar: `"peek"` (on track change), `"always"` or `"off"` |
-| `pillProgress`   | `true`     | Progress ring around the bar's wave                                 |
+| `barStyle`       | `"cover"`  | `"cover"`: album art with progress around it; `"wave"`: wave in a ring |
+| `pillProgress`   | `true`     | Show progress around the bar's cover (or ring)                      |
 | `barLyrics`      | `false`    | Show the line being sung in the bar (fetches lyrics, see Privacy)   |
 | `showWhenClosed` | `false`    | Show a dim "Open Spotify" button when Spotify isn't running         |
 | `albumColors`    | `true`     | Theme the card from the album cover                                 |
@@ -119,7 +122,7 @@ omarchy bar set io.github.iammhador.spotify-pulse barLyrics true
 | `coverStyle`     | `"square"` | `"square"` cover or `"vinyl"` spinning record                       |
 | `karaoke`        | `true`     | Fill the current lyric line as it's sung                            |
 | `visualizer`     | `true`     | Real audio levels when `cava` is installed                          |
-| `history`        | `true`     | Remember and show recently played tracks                            |
+| `history`        | `true`     | Recently played and today's listening stats                       |
 
 ## Scripting
 
@@ -150,7 +153,7 @@ If you disabled another Spotify widget for this one, turn it back on with `omarc
 
 - **Album colors:** each cover is downloaded once from Spotify's image CDN into `~/.cache/spotify-pulse/` (pruned after 7 days) so its colors can be sampled locally.
 - **Lyrics:** only when you turn Lyrics on, or enable `barLyrics`, the song's title, artist, album and length are sent to [lrclib.net](https://lrclib.net) to look up lyrics.
-- **Recently played:** the last 24 tracks (title, artist, album, cover link and Spotify link) are kept in `~/.local/state/spotify-pulse/history.json`, on your machine only. Turn it off with `history false`, or wipe it with `clearHistory`.
+- **Recently played:** the last 24 tracks (title, artist, album, cover link and Spotify link) are kept in `~/.local/state/spotify-pulse/history.json`, on your machine only. Today's listening time and song count are kept next to it in `stats.json`. Turn both off with `history false`, or wipe them with `clearHistory`.
 - **Visualizer:** cava reads audio levels locally; nothing is recorded or sent anywhere.
 
 ## Limitations

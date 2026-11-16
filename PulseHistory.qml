@@ -12,6 +12,7 @@ Item {
   property color fg: "white"
   property color accent: "white"
   property string fontFamily: Style.font.family
+  property string stats: ""           // e.g. "Today 1 h 12 m · 18 songs"
 
   signal play(string uri)
 
@@ -25,7 +26,7 @@ Item {
 
   Text {
     id: caption
-    width: parent.width
+    width: parent.width - (statsText.visible ? statsText.implicitWidth + Style.space(10) : 0)
     text: h.hovered ? h.hovered.title + (h.hovered.artist ? "  —  " + h.hovered.artist : "") : "Recently played"
     textFormat: Text.PlainText
     elide: Text.ElideRight
@@ -33,6 +34,19 @@ Item {
     font.family: h.fontFamily
     font.pixelSize: Style.font.caption
     Behavior on color { ColorAnimation { duration: Style.duration(160) } }
+  }
+
+  Text {
+    id: statsText
+    anchors.right: parent.right
+    anchors.baseline: caption.baseline
+    visible: h.stats !== ""
+    text: h.stats
+    textFormat: Text.PlainText
+    color: Util.alpha(h.fg, 0.5)
+    font.family: h.fontFamily
+    font.pixelSize: Style.font.caption
+    font.features: { "tnum": 1 }
   }
 
   Row {

@@ -335,11 +335,76 @@ Item {
       uri: trackUri, title: title, artist: artist, album: album, art: artUrl
     }, historyMax)
     historyFile.setText(JSON.stringify(history))
+    rollDay()
+    statsSongs++
+    saveStats()
   }
 
   function clearHistory() {
     history = []
     historyFile.setText("[]")
+    statsSeconds = 0
+    statsSongs = 0
+    playStart = playing ? Date.now() : 0
+    saveStats()
+  }
+
+  // ---------------------------------------------------------------- stats
+  // Today's listening time and songs, kept with the history (and off with
+  // it) in ~/.local/state/spotify-pulse/stats.json. Time is counted from
+  // when playback starts and banked on pause, track change or a new day.
+
+  property string statsDay: ""
+  property real statsSeconds: 0
+  property int statsSongs: 0
+  property double playStart: 0
+  readonly property real listenedToday: statsSeconds
+    + (playing && playStart > 0 ? Math.max(0, (now - playStart) / 1000) : 0)
+
+  FileView {
+    id: statsFile
+    path: svc.stateDir + "/stats.json"
+    printErrors: false
+    onLoaded: {
+      try {
+        var d = JSON.parse(statsFile.text())
+        svc.statsDay = String(d.day || "")
+        svc.statsSeconds = Math.max(0, Number(d.seconds) || 0)
+        svc.statsSongs = Math.max(0, Math.round(Number(d.songs) || 0))
+      } catch (e) {}
+      svc.rollDay()
+    }
+  }
+
+  function today() { return Qt.formatDate(new Date(), "yyyy-MM-dd") }
+  onHistoryEnabledChanged: playStart = playing && historyEnabled ? Date.now() : 0
+
+  function rollDay() {
+    var d = today()
+    if (statsDay === d) return
+    statsDay = d
+    statsSeconds = 0
+    statsSongs = 0
+  }
+
+  // Bank the stretch played since `playStart`, and start a new one if still
+  // playing.
+  function bankListening() {
+    var t = Date.now()
+    if (playStart > 0 && historyEnabled) {
+      rollDay()
+      // A stretch over 6 h means a missed pause (suspend); don't count it.
+      var secs = (t - playStart) / 1000
+      if (secs > 0 && secs < 6 * 3600) statsSeconds += secs
+      saveStats()
+    }
+    playStart = playing && historyEnabled ? t : 0
+    now = t
+  }
+
+  function saveStats() {
+    if (!historyEnabled) return
+    statsFile.setText(JSON.stringify({ day: statsDay || today(), seconds: Math.round(statsSeconds), songs: statsSongs }))
   }
 
   // ---------------------------------------------------------------- visualizer
@@ -384,6 +449,7 @@ Item {
     if (!vizLive) levels = []
   }
   onPlayingChanged: {
+    bankListening()
     if (!playing) return
     cavaBroken = false
     if (visualizer && !cavaFound && !cavaProbe.running) cavaProbe.running = true
@@ -434,7 +500,8 @@ Item {
   Timer {
     interval: 1000
     repeat: true
-    running: svc.sleepDeadline > 0 && svc.openCards > 0
+    // Also keeps today's listening time live in an open card.
+    running: svc.openCards > 0 && (svc.sleepDeadline > 0 || svc.playing)
     onTriggered: svc.now = Date.now()
   }
 
@@ -459,6 +526,7 @@ Item {
     lastRemaining = 1e9
     lyricsOffset = 0
     if (historyTimer.running) historyTimer.restart()   // skipped early: start the 10s over
+    if (playing) bankListening()
     loadLyrics()
   }
 

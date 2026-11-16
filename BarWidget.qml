@@ -262,7 +262,8 @@ BarWidget {
         lyricsOffset: s ? s.lyricsOffset : 0,
         visualizer: s ? (s.vizLive ? "live" : (s.cavaFound ? "idle" : "no-cava")) : "",
         sleep: s ? s.sleepMinutes : 0, sleepLeft: s ? s.sleepLeft : 0,
-        history: s ? s.history.length : 0
+        history: s ? s.history.length : 0,
+        today: s ? { seconds: Math.round(s.listenedToday), songs: s.statsSongs } : null
       })
     }
   }
@@ -1041,6 +1042,12 @@ BarWidget {
           return out
         }
         live: root.popupOpen
+        stats: {
+          var s = root.svc
+          if (!s || !root.historyOn || (s.listenedToday < 60 && s.statsSongs === 0)) return ""
+          return "Today " + Model.formatListening(s.listenedToday) + "  ·  "
+            + s.statsSongs + (s.statsSongs === 1 ? " song" : " songs")
+        }
         fg: root.panelFg
         accent: root.animatedAccent
         fontFamily: root.fontFamily
