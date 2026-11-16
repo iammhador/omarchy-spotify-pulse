@@ -21,7 +21,8 @@ Item {
   property color fg: "white"
   property color accent: "white"
 
-  readonly property real stroke: Math.max(1.5, Style.space(2))
+  // A fine line: present, not heavy.
+  readonly property real stroke: Math.max(1, Style.space(1.2))
   readonly property real radius: width * 0.24
   // The outline hugs the art with a hairline of air between them.
   readonly property real gap: showOutline ? stroke + 1 : 0
