@@ -450,7 +450,7 @@ BarWidget {
           PulseWave {
             anchors.fill: parent
             playing: root.playing
-            live: root.visible
+            live: root.visible && eqRing.visible
             levels: root.vizLive ? root.levels : []
             color: root.running ? root.animatedAccent : root.barFg
             opacity: root.playing ? 1 : 0.5
