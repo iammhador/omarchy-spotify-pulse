@@ -380,36 +380,18 @@ BarWidget {
 
         Item {
           id: eq
-          width: eqRing.shown ? Math.round(eqRing.size * 0.5) : Style.space(13)
-          height: eqRing.shown ? Math.round(eqRing.size * 0.44) : Style.space(12)
+          width: eqRing.shown ? Math.round(eqRing.size * 0.64) : Style.space(16)
+          height: eqRing.shown ? Math.round(eqRing.size * 0.5) : Style.space(12)
           anchors.centerIn: parent
-          property real phase: 0
-          NumberAnimation on phase {
-            from: 0; to: 1
-            duration: 1100
-            loops: Animation.Infinite
-            running: root.playing && root.visible && !root.vizLive && root.motion
-          }
-          Repeater {
-            model: 3
-            Rectangle {
-              required property int index
-              readonly property real wave: root.vizLive
-                ? Model.band(root.levels, index / 3, (index + 1) / 3)
-                : (root.motion ? Math.abs(Math.sin((eq.phase + index * 0.37) * Math.PI * (2 + index * 0.6))) : 0.55)
-              x: index * (eq.width / 3)
-              width: Math.max(2, Math.round(eq.width / 3) - 1)
-              radius: width / 2
-              height: root.playing ? eq.height * (0.3 + 0.7 * wave) : eq.height * 0.28
-              anchors.bottom: parent.bottom
-              // Each bar runs from one accent at the base to the other at the tip.
-              gradient: Gradient {
-                GradientStop { position: 0.0; color: root.running ? root.animatedAccent2 : root.barFg }
-                GradientStop { position: 1.0; color: root.running ? root.animatedAccent : root.barFg }
-              }
-              opacity: root.playing ? 1 : 0.5
-              Behavior on height { enabled: !root.playing; NumberAnimation { duration: Style.duration(200) } }
-            }
+
+          PulseWave {
+            anchors.fill: parent
+            playing: root.playing
+            live: root.visible
+            levels: root.vizLive ? root.levels : []
+            color: root.running ? root.animatedAccent : root.barFg
+            opacity: root.playing ? 1 : 0.5
+            Behavior on opacity { NumberAnimation { duration: Style.duration(200) } }
           }
         }
       }

@@ -43,7 +43,7 @@
       { "key": "marquee", "type": "boolean", "label": "Scroll long titles", "defaultValue": true },
       { "key": "scrollAction", "type": "enum", "label": "Mouse wheel on the bar", "options": ["volume", "track", "none"], "defaultValue": "volume" },
       { "key": "pillCover", "type": "enum", "label": "Cover in the bar", "options": ["peek", "always", "off"], "defaultValue": "peek", "description": "peek shows the new cover for a few seconds when the track changes." },
-      { "key": "pillProgress", "type": "boolean", "label": "Progress ring in the bar", "defaultValue": true, "description": "A ring around the equalizer that fills as the song plays." },
+      { "key": "pillProgress", "type": "boolean", "label": "Progress ring in the bar", "defaultValue": true, "description": "A ring around the wave that fills as the song plays." },
       { "key": "barLyrics", "type": "boolean", "label": "Lyrics in the bar", "defaultValue": false, "description": "Show the line being sung instead of the title. Looks lyrics up on lrclib.net." },
       { "key": "showWhenClosed", "type": "boolean", "label": "Show when Spotify is closed", "defaultValue": false },
       { "key": "albumColors", "type": "boolean", "label": "Album colors", "defaultValue": true, "description": "Theme the card from the album cover." },

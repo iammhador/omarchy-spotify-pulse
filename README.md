@@ -11,9 +11,9 @@ An animated Spotify player for the [Omarchy](https://omarchy.org) bar.
 ## Features
 
 **In the bar**
-- `Song — Artist` with an equalizer that moves to the music (see [Visualizer](#visualizer))
+- `Song — Artist` with a little wave that flows to the music (see [Visualizer](#visualizer))
 - On track change the title slides out and back in, and the new cover peeks in for a few seconds
-- A ring around the equalizer fills as the song plays (and briefly shows the volume when you scroll)
+- A ring around the wave fills as the song plays (and briefly shows the volume when you scroll)
 - Long titles scroll back and forth smoothly (only while playing)
 - Optional: the line being sung instead of the title (`barLyrics`)
 - A moon shows while a sleep timer is set
@@ -91,7 +91,7 @@ omarchy restart shell   # the shell keeps the old version loaded until it restar
 
 ## Visualizer
 
-With `cava` installed, the bar and card equalizers show the real audio levels and the cover's glow breathes with the bass. cava only runs while music plays and is stopped the moment you pause. Without cava (or with `visualizer` off) the equalizers fall back to a gentle animation.
+With `cava` installed, the bar's wave and the card's equalizer follow the real audio levels and the cover's glow breathes with the bass. cava only runs while music plays and is stopped the moment you pause. Without cava (or with `visualizer` off) they fall back to a gentle animation.
 
 cava listens to your system's audio output, so it reacts to whatever is playing, not only Spotify. Nothing is recorded or leaves your machine.
 
@@ -111,7 +111,7 @@ omarchy bar set io.github.iammhador.spotify-pulse barLyrics true
 | `marquee`        | `true`     | Scroll long titles (otherwise cut off with `…`)                     |
 | `scrollAction`   | `"volume"` | Mouse wheel on the bar: `"volume"`, `"track"` or `"none"`           |
 | `pillCover`      | `"peek"`   | Cover in the bar: `"peek"` (on track change), `"always"` or `"off"` |
-| `pillProgress`   | `true`     | Progress ring around the bar's equalizer                            |
+| `pillProgress`   | `true`     | Progress ring around the bar's wave                                 |
 | `barLyrics`      | `false`    | Show the line being sung in the bar (fetches lyrics, see Privacy)   |
 | `showWhenClosed` | `false`    | Show a dim "Open Spotify" button when Spotify isn't running         |
 | `albumColors`    | `true`     | Theme the card from the album cover                                 |
