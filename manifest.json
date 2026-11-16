@@ -2,14 +2,17 @@
   "schemaVersion": 1,
   "id": "io.github.iammhador.spotify-pulse",
   "name": "Spotify Pulse",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "iammhador",
   "license": "MIT",
-  "description": "An animated Spotify player for the bar: Song — Artist, album-colored player card, synced lyrics",
+  "description": "An animated Spotify player for the bar: Song — Artist, album-colored player card, karaoke lyrics, real audio visualizer, recently played and a sleep timer",
   "kinds": [
+    "service",
     "bar-widget"
   ],
+  "keepLoaded": true,
   "entryPoints": {
+    "service": "Service.qml",
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
@@ -17,6 +20,40 @@
     "description": "Now playing on Spotify, with an animated player card on click",
     "category": "Media",
     "defaultSection": "center",
-    "allowMultiple": false
+    "allowMultiple": false,
+    "defaults": {
+      "maxWidth": 260,
+      "showArtist": true,
+      "marquee": true,
+      "scrollAction": "volume",
+      "barStyle": "cover",
+      "pillProgress": true,
+      "barLyrics": false,
+      "showWhenClosed": false,
+      "albumColors": true,
+      "blurBackdrop": true,
+      "coverStyle": "square",
+      "karaoke": true,
+      "visualizer": true,
+      "history": true,
+      "sleepFade": true
+    },
+    "schema": [
+      { "key": "maxWidth", "type": "integer", "label": "Max text width (px)", "min": 80, "max": 800, "step": 10, "defaultValue": 260, "description": "Longer titles scroll or get cut off." },
+      { "key": "showArtist", "type": "boolean", "label": "Show artist", "defaultValue": true },
+      { "key": "marquee", "type": "boolean", "label": "Scroll long titles", "defaultValue": true },
+      { "key": "scrollAction", "type": "enum", "label": "Mouse wheel on the bar", "options": ["volume", "track", "none"], "defaultValue": "volume" },
+      { "key": "barStyle", "type": "enum", "label": "Bar style", "options": ["cover", "wave"], "defaultValue": "cover", "description": "cover: the album art with progress around it. wave: a flowing wave in a progress ring." },
+      { "key": "pillProgress", "type": "boolean", "label": "Progress in the bar", "defaultValue": true, "description": "Progress around the bar's cover (or ring around the wave)." },
+      { "key": "barLyrics", "type": "boolean", "label": "Lyrics in the bar", "defaultValue": false, "description": "Show the line being sung instead of the title. Looks lyrics up on lrclib.net." },
+      { "key": "showWhenClosed", "type": "boolean", "label": "Show when Spotify is closed", "defaultValue": false },
+      { "key": "albumColors", "type": "boolean", "label": "Album colors", "defaultValue": true, "description": "Theme the card from the album cover." },
+      { "key": "blurBackdrop", "type": "boolean", "label": "Blurred cover backdrop", "defaultValue": true },
+      { "key": "coverStyle", "type": "enum", "label": "Cover style", "options": ["square", "vinyl"], "defaultValue": "square" },
+      { "key": "karaoke", "type": "boolean", "label": "Karaoke sweep", "defaultValue": true, "description": "Fill the current lyric line as it's sung." },
+      { "key": "visualizer", "type": "boolean", "label": "Audio visualizer", "defaultValue": true, "description": "Real audio levels when cava is installed." },
+      { "key": "history", "type": "boolean", "label": "Recently played", "defaultValue": true, "description": "Remember tracks and today's listening stats in ~/.local/state/spotify-pulse." },
+      { "key": "sleepFade", "type": "boolean", "label": "Sleep timer fade-out", "defaultValue": true, "description": "Ease the volume down before the sleep timer pauses (30 s, or 10 s for 'after this song')." }
+    ]
   }
 }
