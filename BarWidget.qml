@@ -65,7 +65,7 @@ BarWidget {
   onBarChanged: resolveService()
   onSvcChanged: pushConfig()
   Component.onCompleted: resolveService()
-  Component.onDestruction: if (popupOpen && svc) svc.cardOpened(false)
+  Component.onDestruction: if (viewing && svc) svc.cardOpened(false)
 
   // ---------------------------------------------------------------- player
 
@@ -174,8 +174,28 @@ BarWidget {
   }
 
   onPopupOpenChanged: {
-    if (svc) svc.cardOpened(popupOpen)
-    if (popupOpen) introAnim.restart()
+    if (popupOpen) { hoverOpen = false; introAnim.restart() }
+  }
+
+  // Hover preview: a small card with the cover, title and time, after a
+  // short hover over the pill.
+  property bool hoverOpen: false
+  // Someone can see a moving playhead: the service updates it quickly.
+  readonly property bool viewing: popupOpen || hoverOpen
+  onViewingChanged: if (svc) svc.cardOpened(viewing)
+
+  Timer {
+    id: hoverTimer
+    interval: 450
+    onTriggered: {
+      // Not over another open panel: opening would close it.
+      if (mouse.containsMouse && root.running && !root.popupOpen
+          && root.bar && !root.bar.activePopout) root.hoverOpen = true
+    }
+  }
+  QtObject {
+    id: hoverOwner
+    function close() { root.hoverOpen = false }
   }
 
   // Spotify blanks the metadata for a moment between tracks. Ride that out
@@ -472,11 +492,20 @@ BarWidget {
         if (root.scrollAction === "volume") root.nudgeVolume(up ? 0.05 : -0.05)
         else if (root.scrollAction === "track") { if (up) root.previous(); else root.next() }
       }
-      onEntered: if (root.bar && !root.popupOpen) root.bar.showTooltip(root, root.running
-        ? root.title + (root.artist ? "\n" + root.artist : "") + (root.album ? " · " + root.album : "")
-        : "Open Spotify")
-      onExited: if (root.bar) root.bar.hideTooltip(root)
-      onPressed: if (root.bar) root.bar.hideTooltip(root)
+      onEntered: {
+        if (root.running) hoverTimer.restart()
+        else if (root.bar) root.bar.showTooltip(root, "Open Spotify")
+      }
+      onExited: {
+        hoverTimer.stop()
+        root.hoverOpen = false
+        if (root.bar) root.bar.hideTooltip(root)
+      }
+      onPressed: {
+        hoverTimer.stop()
+        root.hoverOpen = false
+        if (root.bar) root.bar.hideTooltip(root)
+      }
     }
   }
 
@@ -984,6 +1013,114 @@ BarWidget {
           accent: root.spotifyGreen
           fontFamily: root.fontFamily
           onClicked: { root.launch(); root.close() }
+        }
+      }
+    }
+  }
+
+  // ================================================================ HOVER PREVIEW
+
+  PopupCard {
+    id: preview
+    anchorItem: pill
+    owner: hoverOwner
+    bar: root.bar
+    triggerMode: "hover"
+    open: root.hoverOpen && root.running
+    contentWidth: preview.fittedContentWidth(Style.space(290))
+    contentHeight: preview.fittedContentHeight(previewRow.implicitHeight)
+
+    Row {
+      id: previewRow
+      width: parent.width
+      spacing: Style.space(12)
+
+      Item {
+        id: previewArt
+        width: Style.space(58)
+        height: width
+        anchors.verticalCenter: parent.verticalCenter
+        layer.enabled: true
+        layer.effect: MultiEffect {
+          maskEnabled: true
+          maskSource: previewMask
+        }
+        Rectangle { anchors.fill: parent; color: Util.alpha(root.panelFg, 0.08) }
+        Image {
+          anchors.fill: parent
+          source: root.hoverOpen ? root.artUrl : ""
+          sourceSize: Qt.size(128, 128)
+          fillMode: Image.PreserveAspectCrop
+          asynchronous: true
+        }
+      }
+      Item {
+        id: previewMask
+        anchors.fill: previewArt
+        layer.enabled: true
+        visible: false
+        Rectangle { anchors.fill: parent; radius: Math.max(Style.space(8), Style.cornerRadius / 2) }
+      }
+
+      Column {
+        width: parent.width - previewArt.width - parent.spacing
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: Style.space(3)
+
+        PulseMarquee {
+          width: parent.width
+          text: root.title
+          color: root.panelFg
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body + Style.space(1)
+          font.bold: true
+          active: root.hoverOpen
+        }
+        Text {
+          width: parent.width
+          text: root.artist + (root.album && root.album !== root.title ? "  ·  " + root.album : "")
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          color: Util.alpha(root.panelFg, 0.62)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.bodySmall
+        }
+        Item { width: 1; height: Style.space(4) }
+        Rectangle {
+          width: parent.width
+          height: Math.max(2, Style.space(3))
+          radius: height / 2
+          color: Util.alpha(root.panelFg, 0.15)
+          Rectangle {
+            height: parent.height
+            radius: height / 2
+            width: Math.max(height, parent.width * root.progress)
+            gradient: Gradient {
+              orientation: Gradient.Horizontal
+              GradientStop { position: 0.0; color: root.animatedAccent }
+              GradientStop { position: 1.0; color: root.animatedAccent2 }
+            }
+          }
+        }
+        Item {
+          width: parent.width
+          height: previewElapsed.implicitHeight
+          Text {
+            id: previewElapsed
+            text: (root.playing ? "" : "Paused  ·  ") + Model.timestamp(root.position)
+            color: Util.alpha(root.panelFg, 0.55)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.features: { "tnum": 1 }
+          }
+          Text {
+            anchors.right: parent.right
+            text: "-" + Model.timestamp(root.duration - root.position)
+            color: Util.alpha(root.panelFg, 0.55)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            font.features: { "tnum": 1 }
+          }
         }
       }
     }
