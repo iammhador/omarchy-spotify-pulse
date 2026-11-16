@@ -258,6 +258,11 @@ Item {
       lyricsStatus = cached.status
       return
     }
+    // Your own lyrics win: ~/.local/share/spotify-pulse/lyrics/Artist - Title.lrc
+    // (or .txt for plain text), read locally, nothing sent anywhere.
+    var local = readLocalLyrics()
+    if (local !== null) { finishLyrics(key, local, 200); return }
+
     lyricLines = []
     lyricsSynced = true
     lyricsStatus = "loading"
@@ -283,6 +288,29 @@ Item {
                        status === 200 || status === 404 ? status : status2)
       })
     })
+  }
+
+  readonly property string lyricsDir: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/spotify-pulse/lyrics"
+  FileView {
+    id: localLyricsFile
+    printErrors: false
+    blockLoading: true   // text() waits for the file instead of returning ""
+  }
+
+  // { synced, plain } from a local .lrc / .txt file for this song, or null.
+  function readLocalLyrics() {
+    var base = lyricsDir + "/" + Model.lyricsFileName(artist, title)
+    var exts = [".lrc", ".txt"]
+    for (var i = 0; i < exts.length; i++) {
+      localLyricsFile.path = base + exts[i]
+      var text = localLyricsFile.text() || ""
+      if (String(text).trim() === "") continue
+      return Model.parseLrc(text).length
+        ? { synced: text, plain: "", instrumental: false }
+        : { synced: "", plain: text, instrumental: false }
+    }
+    localLyricsFile.path = ""
+    return null
   }
 
   function cancelLyricsFetch() {

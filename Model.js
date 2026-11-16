@@ -93,6 +93,13 @@ function pickLyrics(data, duration) {
   return { synced: best.synced, plain: best.plain, instrumental: false }
 }
 
+// File name (without extension) for a song's own lyrics: "Artist - Title",
+// minus characters that can't go in a file name.
+function lyricsFileName(artist, title) {
+  var name = (String(artist || "") + " - " + String(title || "")).replace(/[\/\\:*?"<>|\u0000-\u001f]/g, "").trim()
+  return name
+}
+
 // How long a line takes to sing, for the karaoke sweep: roughly by length,
 // never past the next line.
 function sweepSpan(text, gap) {
