@@ -39,6 +39,7 @@ An animated Spotify player for the [Omarchy](https://omarchy.org) bar.
   - Lyrics come from [lrclib.net](https://lrclib.net) and are opt-in (see Privacy).
 - **Swipe the cover** left for the next song or right for the previous one: it follows the pointer and flies off, and the next cover glides in.
 - **Seek preview:** hover the seek bar to see the time there, and the lyric line sung at that point when lyrics are on.
+- **♡ Like:** toggles the song in your Liked Songs, free accounts included. It works by sending the Spotify app its own Like shortcut (Alt+Shift+B) through Hyprland, so Spotify doesn't need focus. The heart fills briefly to confirm Spotify got it. It can't show whether a song is already liked; Spotify only shares that through its Web API.
 - **Recently played:** the last tracks as small covers. Hover for the name, click to play it again. Today's listening time and song count sit beside it.
 - **Sleep timer:** pause after 15, 30 or 60 minutes, or when the song ends.
 - Long titles scroll in the card too, instead of being cut off.
@@ -54,6 +55,7 @@ An animated Spotify player for the [Omarchy](https://omarchy.org) bar.
 | `←` / `→` | Seek 5 s | `0`–`9` | Jump to 0 %–90 % |
 | `↑` / `↓` | Volume | `S` / `R` | Shuffle / repeat |
 | `L` | Lyrics | `[` / `]` | Lyrics sooner / later |
+| `H` | Like / unlike | | |
 | `Z` | Sleep timer | `Esc` | Close |
 
 <p align="center">
@@ -135,6 +137,7 @@ omarchy-shell spotify-pulse shuffle
 omarchy-shell spotify-pulse repeat
 omarchy-shell spotify-pulse volume 60     # percent
 omarchy-shell spotify-pulse lyrics        # toggle lyrics
+omarchy-shell spotify-pulse like          # like / unlike the current song in Spotify
 omarchy-shell spotify-pulse sleep 30      # pause in 30 min; -1 = when the song ends, 0 = off
 omarchy-shell spotify-pulse clearHistory
 omarchy-shell spotify-pulse status        # JSON: track, position, lyrics, visualizer, sleep…
@@ -158,7 +161,7 @@ If you disabled another Spotify widget for this one, turn it back on with `omarc
 
 ## Limitations
 
-MPRIS can't like songs, browse playlists or show the queue. Those need Spotify's Web API and a login, which this plugin deliberately avoids. Recently played is the next best thing: it's remembered locally.
+MPRIS can't like songs, browse playlists or show the queue. Those need Spotify's Web API, which since February 2026 also requires Spotify Premium and your own developer app, so this plugin avoids it. Like works anyway through Spotify's own shortcut; adding to a playlist and the queue don't. Recently played is the next best thing to a queue: it's remembered locally.
 
 ## Credits
 

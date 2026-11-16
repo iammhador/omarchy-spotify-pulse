@@ -166,6 +166,22 @@ BarWidget {
   function toggleShuffle() { if (svc) svc.toggleShuffle() }
   function cycleRepeat() { if (svc) svc.cycleRepeat() }
   function toggleLyrics() { if (svc) svc.lyricsOn = !svc.lyricsOn }
+  function toggleLike() { if (svc) svc.toggleLike() }
+
+  // Brief filled heart after a like request reached Spotify.
+  property bool likeFlash: false
+  Timer {
+    id: likeFlashTimer
+    interval: 1300
+    onTriggered: root.likeFlash = false
+  }
+  Connections {
+    target: root.svc
+    function onLikeSent(ok) {
+      if (ok) { root.likeFlash = true; likeFlashTimer.restart() }
+      else if (root.motion) likeShake.restart()
+    }
+  }
 
   Timer {
     id: volumeFlashTimer
@@ -246,6 +262,8 @@ BarWidget {
     // Minutes until pause; 0 turns it off, -1 pauses when the track ends.
     function sleep(minutes: int): void { if (root.svc) root.svc.setSleep(minutes) }
     function clearHistory(): void { if (root.svc) root.svc.clearHistory() }
+    // Toggle the current song in Liked Songs (sends Spotify its shortcut).
+    function like(): void { root.toggleLike() }
     function status(): string {
       var s = root.svc
       return JSON.stringify({
@@ -290,11 +308,9 @@ BarWidget {
     height: Math.round(root.barSize * (root.barStyle === "cover" && root.running ? 0.86 : 0.72))
     width: pillRow.width + Style.space(18)
     radius: height / 2
-    color: Util.alpha(root.animatedAccent, mouse.containsMouse || root.popupOpen ? 0.16 : (root.peeking ? 0.10 : 0.0))
-    border.width: mouse.containsMouse || root.popupOpen ? 1 : 0
-    border.color: Util.alpha(root.animatedAccent, 0.35)
+    // No hover or open highlight: the cover and text carry the widget.
+    color: "transparent"
     opacity: root.running ? 1 : 0.55
-    Behavior on color { ColorAnimation { duration: Style.duration(180) } }
     Behavior on width { NumberAnimation { duration: Style.duration(260); easing.type: Easing.OutCubic } }
 
     // Shown text lags `pillText` so the swap can animate out and back in.
@@ -543,6 +559,7 @@ BarWidget {
         else if (e.key === Qt.Key_S) root.toggleShuffle()
         else if (e.key === Qt.Key_R) root.cycleRepeat()
         else if (e.key === Qt.Key_L) root.toggleLyrics()
+        else if (e.key === Qt.Key_H) root.toggleLike()
         else if (e.key === Qt.Key_Z) { if (root.svc) root.svc.cycleSleep() }
         else if (e.key === Qt.Key_BracketLeft && root.lyricsOn) { if (root.svc) root.svc.nudgeLyrics(0.5) }
         else if (e.key === Qt.Key_BracketRight && root.lyricsOn) { if (root.svc) root.svc.nudgeLyrics(-0.5) }
@@ -678,7 +695,7 @@ BarWidget {
 
         Column {
           id: infoCol
-          width: parent.width - miniEq.width - Style.space(12)
+          width: parent.width - miniEq.width - likeBtn.width - Style.space(16)
           spacing: Style.space(3)
 
           PulseMarquee {
@@ -703,7 +720,36 @@ BarWidget {
           }
         }
 
-        // Little equalizer where a like button would go.
+        // Like: toggles the song in Spotify's Liked Songs (via the app's own
+        // shortcut). The heart fills briefly to confirm Spotify got it; it
+        // can't show whether the song is liked.
+        PulseIconButton {
+          id: likeBtn
+          anchors.right: miniEq.left
+          anchors.rightMargin: Style.space(4)
+          anchors.verticalCenter: parent.verticalCenter
+          implicitWidth: Style.space(30)
+          implicitHeight: Style.space(30)
+          icon: root.likeFlash ? "󰋑" : "󰋕"
+          size: Style.font.icon + Style.space(2)
+          color: root.panelFg
+          accent: root.animatedAccent
+          fontFamily: root.fontFamily
+          active: root.likeFlash
+          enabled: root.running
+          onClicked: root.toggleLike()
+
+          // Shake when Spotify's window couldn't be reached.
+          SequentialAnimation {
+            id: likeShake
+            NumberAnimation { target: likeBtn; property: "anchors.rightMargin"; to: Style.space(8); duration: 50 }
+            NumberAnimation { target: likeBtn; property: "anchors.rightMargin"; to: 0; duration: 70 }
+            NumberAnimation { target: likeBtn; property: "anchors.rightMargin"; to: Style.space(6); duration: 70 }
+            NumberAnimation { target: likeBtn; property: "anchors.rightMargin"; to: Style.space(4); duration: 50 }
+          }
+        }
+
+        // Little wave beside the like button.
         Item {
           id: miniEq
           anchors.right: parent.right

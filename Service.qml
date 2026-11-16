@@ -92,6 +92,31 @@ Item {
       "/org/mpris/MediaPlayer2", "org.mpris.MediaPlayer2.Player", "OpenUri", "s", String(uri)])
   }
 
+  // ---------------------------------------------------------------- like
+  // MPRIS can't like songs, and Spotify's Web API needs Premium plus a
+  // developer app. Instead, send the Spotify app its own Like shortcut
+  // (Alt+Shift+B) through Hyprland, straight to its window: no focus change,
+  // works for free accounts. It toggles, and the plugin can't read whether
+  // the song is liked, so the UI only confirms that Spotify got the request.
+
+  signal likeSent(bool ok)
+
+  function toggleLike() {
+    if (!running || likeProc.running) return
+    likeProc.running = true
+  }
+
+  Process {
+    id: likeProc
+    // Hyprland's Lua dispatcher first, then the older text syntax.
+    command: ["sh", "-c",
+      'r=$(hyprctl dispatch \'hl.dsp.send_shortcut({ mods = "ALT SHIFT", key = "B", window = "class:^([Ss]potify)$" })\' 2>&1)\n'
+      + '[ "$r" = ok ] && exit 0\n'
+      + 'r=$(hyprctl dispatch sendshortcut "ALT SHIFT, B, class:^([Ss]potify)$" 2>&1)\n'
+      + '[ "$r" = ok ]']
+    onExited: function(code) { svc.likeSent(code === 0) }
+  }
+
   // ---------------------------------------------------------------- position
   // MPRIS position is interpolated on read; nudging the signal refreshes
   // bindings. Fast while a card is open or lyrics play in the bar, slow for
