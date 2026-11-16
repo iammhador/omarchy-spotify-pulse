@@ -1,17 +1,21 @@
 // Spotify Pulse — an animated Spotify player for the Omarchy bar.
 //
-// Bar:  "Song — Artist" with a live equalizer, a slide transition on track
-//       change and a ping-pong marquee for long titles. Left click opens the
-//       card, middle click plays/pauses, scroll changes Spotify's volume.
-// Card: cover-first player tinted by the album art: glowing cover, seek,
-//       shuffle / previous / play / next / repeat, Spotify volume, and
-//       synced lyrics (lrclib.net) that flip in on the back of the cover.
+// Bar:  "Song — Artist" (or the line being sung) with an equalizer that
+//       follows the music, a peek at the cover on track change, a thin
+//       progress line and a ping-pong marquee for long titles. Left click
+//       opens the card, middle click plays/pauses, right click skips, scroll
+//       changes Spotify's volume.
+// Card: cover-first player tinted by two colors from the album art: glowing
+//       cover (or a spinning record), seek, shuffle / previous / play / next /
+//       repeat, volume, recently played, a sleep timer, and synced lyrics
+//       with a karaoke sweep that flip in on the back of the cover.
 //
 // Everything is driven by Spotify's MPRIS interface, so it stays in sync with
 // the desktop app, media keys and Spotify Connect. No account or API key.
 //
-// Nothing ticks while the card is closed; the bar only animates while music
-// plays.
+// Shared state and every side effect (lyrics lookups, cover sampling, the
+// visualizer, history, sleep) live in Service.qml, created once by the
+// shell. This file is the per-monitor UI on top of it.
 
 import QtQuick
 import QtQuick.Effects
@@ -27,19 +31,56 @@ BarWidget {
   id: root
   moduleName: "io.github.iammhador.spotify-pulse"
 
+  // ---------------------------------------------------------------- service
+
+  property var svc: null
+  property int resolveTries: 0
+
+  function resolveService() {
+    if (svc) return
+    if (bar && bar.shell && typeof bar.shell.serviceFor === "function")
+      svc = bar.shell.serviceFor(moduleName) || null
+  }
+
+  // The service can finish loading after the widget; look again until it's up.
+  Timer {
+    interval: 250
+    repeat: true
+    running: root.svc === null && !localService.active
+    onTriggered: {
+      root.resolveService()
+      // Still nothing after 5 s: the shell couldn't start it, so host one here
+      // (per monitor, but better than an empty bar).
+      if (!root.svc && ++root.resolveTries >= 20) localService.active = true
+    }
+  }
+  Loader {
+    id: localService
+    active: false
+    source: "Service.qml"
+    onLoaded: if (!root.svc) root.svc = item
+  }
+
+  onBarChanged: resolveService()
+  onSvcChanged: pushConfig()
+  Component.onCompleted: resolveService()
+  Component.onDestruction: if (popupOpen && svc) svc.cardOpened(false)
+
   // ---------------------------------------------------------------- player
 
-  readonly property var player: Model.selectPlayer(Mpris.players.values)
-  readonly property bool running: player !== null
-  readonly property bool playing: running && player.isPlaying
-  readonly property string title: running ? String(player.trackTitle || "") : ""
-  readonly property string artist: running ? String(player.trackArtist || "") : ""
-  readonly property string album: running ? String(player.trackAlbum || "") : ""
-  readonly property string artUrl: running ? String(player.trackArtUrl || "") : ""
-  readonly property string trackKey: title + "\u0001" + artist + "\u0001" + album
-  readonly property real duration: running && player.lengthSupported ? Math.max(0, player.length) : 0
-  readonly property real position: running && player.positionSupported ? Model.clamp(player.position, 0, duration || 1e9) : 0
-  readonly property real progress: duration > 0 ? position / duration : 0
+  readonly property var player: svc ? svc.player : null
+  readonly property bool running: svc ? svc.running : false
+  readonly property bool playing: svc ? svc.playing : false
+  readonly property string title: svc ? svc.title : ""
+  readonly property string artist: svc ? svc.artist : ""
+  readonly property string album: svc ? svc.album : ""
+  readonly property string artUrl: svc ? svc.artUrl : ""
+  readonly property string trackKey: svc ? svc.trackKey : ""
+  readonly property real duration: svc ? svc.duration : 0
+  readonly property real position: svc ? svc.position : 0
+  readonly property real progress: svc ? svc.progress : 0
+  readonly property real volume: svc ? svc.volume : 0
+  readonly property bool lyricsOn: svc ? svc.lyricsOn : false
 
   // ---------------------------------------------------------------- settings
 
@@ -49,6 +90,10 @@ BarWidget {
     if (typeof v === "string") return !/^(false|0|no|off)$/i.test(v.trim())
     return !!v
   }
+  function choice(name, fallback, options) {
+    var v = String(setting(name, fallback)).trim().toLowerCase()
+    return options.indexOf(v) !== -1 ? v : fallback
+  }
 
   readonly property int maxWidth: Number(setting("maxWidth", 260)) > 0 ? Number(setting("maxWidth", 260)) : 260
   readonly property bool showArtist: flag("showArtist", true)
@@ -56,66 +101,46 @@ BarWidget {
   readonly property bool showWhenClosed: flag("showWhenClosed", false)
   readonly property bool albumColors: flag("albumColors", true)
   readonly property bool blurBackdrop: flag("blurBackdrop", true)
-  readonly property string scrollAction: String(setting("scrollAction", "volume"))
+  readonly property string scrollAction: choice("scrollAction", "volume", ["volume", "track", "none"])
+  readonly property bool barLyrics: flag("barLyrics", false)
+  readonly property bool visualizer: flag("visualizer", true)
+  readonly property bool historyOn: flag("history", true)
+  readonly property bool karaoke: flag("karaoke", true)
+  readonly property string pillCover: choice("pillCover", "peek", ["peek", "always", "off"])
+  readonly property bool pillProgress: flag("pillProgress", true)
+  readonly property bool vinyl: choice("coverStyle", "square", ["square", "vinyl"]) === "vinyl"
 
-  // ---------------------------------------------------------------- colors
+  readonly property var serviceConfig: ({
+    albumColors: albumColors, visualizer: visualizer, history: historyOn,
+    barLyrics: barLyrics, pillProgress: pillProgress
+  })
+  onServiceConfigChanged: pushConfig()
+  function pushConfig() { if (svc) svc.configure(serviceConfig) }
+
+  // ---------------------------------------------------------------- look
 
   readonly property color barFg: bar ? bar.barForeground : Commons.Color.foreground
   readonly property color panelFg: bar ? bar.foreground : Commons.Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property bool darkTheme: Commons.Color.background.hslLightness < 0.5
+  readonly property bool motion: !Style.reduceMotion
   readonly property color spotifyGreen: "#1ed760"
 
-  // Album accent, sampled once per track from a small copy of the cover.
-  property color albumAccent: Commons.Color.accent
-  readonly property color accent: albumColors ? albumAccent : Commons.Color.accent
-  property color animatedAccent: accent
-  Behavior on animatedAccent { ColorAnimation { duration: 600; easing.type: Easing.OutCubic } }
+  // Two album colors, crossfading between tracks.
+  property color animatedAccent: svc ? svc.accent : Commons.Color.accent
+  property color animatedAccent2: svc ? svc.accent2 : Commons.Color.accent
+  Behavior on animatedAccent { ColorAnimation { duration: Style.duration(600); easing.type: Easing.OutCubic } }
+  Behavior on animatedAccent2 { ColorAnimation { duration: Style.duration(600); easing.type: Easing.OutCubic } }
 
-  // ColorQuantizer only reads local files, and Spotify serves covers over
-  // https, so fetch each cover once into a small cache (pruned after a week).
-  readonly property string artCacheDir: Quickshell.env("HOME") + "/.cache/spotify-pulse"
-  property string artFile: ""
+  // Audio levels from the visualizer (empty without cava).
+  readonly property var levels: svc ? svc.levels : []
+  readonly property bool vizLive: !!svc && svc.vizLive && levels.length > 0
+  readonly property real bass: vizLive ? Model.band(levels, 0, 0.25) : 0
 
-  function fetchArt() {
-    if (!albumColors || artUrl === "") { artFile = ""; return }
-    if (artUrl.indexOf("file://") === 0) { artFile = artUrl.substring(7); return }
-    var name = artUrl.split("/").pop().replace(/[^A-Za-z0-9_-]/g, "")
-    if (name === "") return
-    artFetch.running = false
-    artFetch.target = artCacheDir + "/" + name + ".jpg"
-    artFetch.command = ["sh", "-c",
-      'mkdir -p "$1" && find "$1" -name "*.jpg" -mtime +7 -delete; [ -s "$2" ] || curl -sfL --max-time 10 -o "$2" "$3"',
-      "sh", artCacheDir, artFetch.target, artUrl]
-    artFetch.running = true
-  }
-
-  Process {
-    id: artFetch
-    property string target: ""
-    onExited: function(code) { if (code === 0) root.artFile = target }
-  }
-
-  onArtUrlChanged: fetchArt()
-  onAlbumColorsChanged: fetchArt()
-  Component.onCompleted: fetchArt()
-
-  ColorQuantizer {
-    id: quantizer
-    source: root.artFile !== "" ? "file://" + root.artFile : ""
-    depth: 3
-    rescaleSize: 64
-    onColorsChanged: {
-      var c = Model.accentFrom(quantizer.colors, root.darkTheme, Qt)
-      root.albumAccent = c ? c : Commons.Color.accent
-    }
-  }
-
-  // ---------------------------------------------------------------- state
+  // ---------------------------------------------------------------- actions
 
   property bool popupOpen: false
   readonly property bool opened: popupOpen
-  property bool lyricsOn: false
   property real volumeFlash: 0
 
   function open() { if (running) popupOpen = true }
@@ -123,44 +148,21 @@ BarWidget {
   function toggle() { if (running) popupOpen = !popupOpen; else launch() }
   onRunningChanged: if (!running) close()
 
-  function launch() {
-    if (running && player.canRaise) player.raise()
-    else Quickshell.execDetached(["spotify"])
-  }
-  function playPause() { if (running && player.canTogglePlaying) player.togglePlaying() }
-  function next() { if (running && player.canGoNext) player.next() }
-  function previous() {
-    if (!running) return
-    // Like the app: restart the song unless we're at its very start.
-    if (position > 4 && player.canSeek) seekTo(0)
-    else if (player.canGoPrevious) player.previous()
-  }
-  function seekTo(seconds) {
-    if (running && player.canSeek && duration > 0) player.position = Model.clamp(seconds, 0, duration - 0.5)
-  }
+  function launch() { if (svc) svc.launch(); else Quickshell.execDetached(["spotify"]) }
+  function playPause() { if (svc) svc.playPause() }
+  function next() { if (svc) svc.next() }
+  function previous() { if (svc) svc.previous() }
+  function seekTo(seconds) { if (svc) svc.seekTo(seconds) }
   function setVolume(v) {
     if (!running || !player.volumeSupported) return
-    player.volume = Model.clamp(v, 0, 1)
+    svc.setVolume(v)
     volumeFlash = 1
     volumeFlashTimer.restart()
   }
-  function nudgeVolume(delta) { if (running) setVolume(player.volume + delta) }
-  function toggleShuffle() { if (running && player.shuffleSupported) player.shuffle = !player.shuffle }
-  function cycleRepeat() {
-    if (!running || !player.loopSupported) return
-    if (player.loopState === MprisLoopState.None) player.loopState = MprisLoopState.Playlist
-    else if (player.loopState === MprisLoopState.Playlist) player.loopState = MprisLoopState.Track
-    else player.loopState = MprisLoopState.None
-  }
-
-  // MPRIS position is interpolated on read; nudging the signal refreshes
-  // bindings. Only while someone is looking at a moving playhead.
-  Timer {
-    interval: 250
-    repeat: true
-    running: root.popupOpen && root.playing
-    onTriggered: root.player.positionChanged()
-  }
+  function nudgeVolume(delta) { if (running) setVolume(volume + delta) }
+  function toggleShuffle() { if (svc) svc.toggleShuffle() }
+  function cycleRepeat() { if (svc) svc.cycleRepeat() }
+  function toggleLyrics() { if (svc) svc.lyricsOn = !svc.lyricsOn }
 
   Timer {
     id: volumeFlashTimer
@@ -168,113 +170,41 @@ BarWidget {
     onTriggered: root.volumeFlash = 0
   }
 
-  // ---------------------------------------------------------------- lyrics
-
-  property var lyricLines: []
-  property string lyricsStatus: ""   // "", "loading", "none", "error"
-  property string lyricsKey: ""
-  property var lyricsCache: ({})
-  readonly property int lyricsCacheMax: 50
-  readonly property int lyricIdx: lyricLines.length ? Model.lyricIndex(lyricLines, position) : -1
-
-  // Only the newest request may report back; anything older is stale.
-  property int lyricsReq: 0
-  property var lyricsXhr: null
-
-  function loadLyrics() {
-    if (!lyricsOn || !running || title === "") return
-    if (lyricsKey === trackKey) return
-    cancelLyricsFetch()
-    var key = trackKey
-    lyricsKey = key
-    if (lyricsCache[key] !== undefined) {
-      lyricLines = lyricsCache[key]
-      lyricsStatus = lyricLines.length ? "" : "none"
-      return
-    }
-    lyricLines = []
-    lyricsStatus = "loading"
-    var q = Model.encodeQuery({
-      track_name: title, artist_name: artist, album_name: album,
-      duration: duration > 0 ? Math.round(duration) : ""
-    })
-    var searchUrl = "https://lrclib.net/api/search?" + Model.encodeQuery({ track_name: title, artist_name: artist })
-    fetchLyrics("https://lrclib.net/api/get?" + q, function() {
-      // No exact match (or lrclib hiccuped): fall back to a looser search.
-      fetchLyrics(searchUrl, null)
-    })
+  onPopupOpenChanged: {
+    if (svc) svc.cardOpened(popupOpen)
+    if (popupOpen) introAnim.restart()
   }
 
-  function cancelLyricsFetch() {
-    lyricsReq++
-    lyricsTimeout.stop()
-    var xhr = lyricsXhr
-    lyricsXhr = null
-    if (xhr) xhr.abort()
+  // Spotify blanks the metadata for a moment between tracks. Ride that out
+  // instead of hiding the pill (and losing its text) for a frame.
+  property bool bridging: false
+  readonly property bool hasTitle: title !== ""
+  onHasTitleChanged: {
+    bridging = !hasTitle && running
+    if (bridging) bridgeTimer.restart()
   }
-
-  function fetchLyrics(url, onMiss) {
-    var req = ++lyricsReq
-    var key = lyricsKey
-    var xhr = new XMLHttpRequest()
-    xhr.onreadystatechange = function() {
-      if (xhr.readyState !== XMLHttpRequest.DONE || req !== root.lyricsReq) return
-      lyricsTimeout.stop()
-      root.lyricsXhr = null
-      var synced = ""
-      if (xhr.status === 200) {
-        try {
-          var data = JSON.parse(xhr.responseText)
-          if (Array.isArray(data)) {
-            for (var i = 0; i < data.length && !synced; i++) synced = data[i].syncedLyrics || ""
-          } else {
-            synced = data.syncedLyrics || ""
-          }
-        } catch (e) {}
-      }
-      // Status 0 means lrclib is unreachable, so a second request would fail too.
-      if (!synced && onMiss && xhr.status !== 0) { onMiss(); return }
-      root.applyLyrics(key, Model.parseLrc(synced), xhr.status !== 200 && xhr.status !== 404)
-    }
-    lyricsXhr = xhr
-    xhr.open("GET", url)
-    xhr.send()
-    lyricsTimeout.restart()
-  }
-
-  function applyLyrics(key, lines, failed) {
-    if (key !== lyricsKey) return
-    lyricLines = lines
-    if (failed) {
-      // Not cached, so turning lyrics back on (or replaying the song) retries.
-      lyricsStatus = "error"
-      lyricsKey = ""
-      return
-    }
-    var cache = lyricsCache
-    cache[key] = lines
-    var keys = Object.keys(cache)   // insertion order, oldest first
-    for (var i = 0; i < keys.length - lyricsCacheMax; i++) delete cache[keys[i]]
-    lyricsCache = cache
-    lyricsStatus = lines.length ? "" : "none"
-  }
-
-  // An lrclib request that hangs ends as an error instead of loading forever.
   Timer {
-    id: lyricsTimeout
-    interval: 8000
-    onTriggered: {
-      var key = root.lyricsKey
-      root.cancelLyricsFetch()
-      root.applyLyrics(key, [], true)
-    }
+    id: bridgeTimer
+    interval: 1500
+    onTriggered: root.bridging = false
   }
 
-  onLyricsOnChanged: loadLyrics()
-  onPillTextChanged: pill.swapTrack()
+  // Peek: on track change, briefly show the new cover in the bar.
+  property bool peeking: false
+  property string lastTrack: ""
+  Timer {
+    id: peekTimer
+    interval: 4000
+    onTriggered: root.peeking = false
+  }
   onTrackKeyChanged: {
     if (popupOpen) trackAnim.restart()
-    loadLyrics()
+    if (title === "") return
+    if (lastTrack !== "" && lastTrack !== trackKey && pillCover === "peek" && running && !popupOpen) {
+      peeking = true
+      peekTimer.restart()
+    }
+    lastTrack = trackKey
   }
 
   // ---------------------------------------------------------------- ipc
@@ -286,33 +216,48 @@ BarWidget {
     function playPause(): void { root.playPause() }
     function next(): void { root.next() }
     function previous(): void { root.previous() }
-    function lyrics(): void { root.lyricsOn = !root.lyricsOn }
+    function lyrics(): void { root.toggleLyrics() }
     function shuffle(): void { root.toggleShuffle() }
     function repeat(): void { root.cycleRepeat() }
     function volume(percent: int): void { root.setVolume(percent / 100) }
+    // Minutes until pause; 0 turns it off, -1 pauses when the track ends.
+    function sleep(minutes: int): void { if (root.svc) root.svc.setSleep(minutes) }
+    function clearHistory(): void { if (root.svc) root.svc.clearHistory() }
     function status(): string {
+      var s = root.svc
       return JSON.stringify({
         running: root.running, playing: root.playing, popupOpen: root.popupOpen,
         title: root.title, artist: root.artist, album: root.album,
+        uri: s ? s.trackUri : "",
         position: Math.round(root.position * 10) / 10, duration: root.duration,
         shuffle: root.running ? root.player.shuffle : false,
         loop: root.running ? root.player.loopState : 0,
-        volume: root.running ? root.player.volume : 0,
-        accent: String(root.accent), lyricsOn: root.lyricsOn, lyricsLines: root.lyricLines.length
+        volume: root.volume,
+        accent: s ? String(s.accent) : "", accent2: s ? String(s.accent2) : "",
+        lyricsOn: root.lyricsOn, lyricsStatus: s ? s.lyricsStatus : "",
+        lyricsSynced: s ? s.lyricsSynced : true, lyricsLines: s ? s.lyricLines.length : 0,
+        lyricsOffset: s ? s.lyricsOffset : 0,
+        visualizer: s ? (s.vizLive ? "live" : (s.cavaFound ? "idle" : "no-cava")) : "",
+        sleep: s ? s.sleepMinutes : 0, sleepLeft: s ? s.sleepLeft : 0,
+        history: s ? s.history.length : 0
       })
     }
   }
 
   // ================================================================ BAR PILL
 
-  readonly property bool shown: running ? title !== "" : showWhenClosed
+  readonly property bool shown: svc !== null && (running ? (title !== "" || bridging) : showWhenClosed)
   visible: shown && !vertical
   implicitWidth: shown && !vertical ? pill.width : 0
   implicitHeight: barSize
 
-  readonly property string pillText: running
-    ? title + (showArtist && artist ? "  —  " + artist : "")
-    : "Open Spotify"
+  readonly property string trackText: title + (showArtist && artist ? "  —  " + artist : "")
+  readonly property string lyricText: svc ? svc.currentLine : ""
+  readonly property bool showingLyric: running && barLyrics && playing && lyricText !== ""
+  readonly property string pillText: !running ? "Open Spotify" : (showingLyric ? lyricText : trackText)
+  onPillTextChanged: pill.swapTrack()
+
+  readonly property bool showThumb: running && (pillCover === "always" || (pillCover === "peek" && peeking))
 
   Rectangle {
     id: pill
@@ -320,20 +265,40 @@ BarWidget {
     height: Math.round(root.barSize * 0.72)
     width: pillRow.width + Style.space(18)
     radius: height / 2
-    color: Util.alpha(root.animatedAccent, mouse.containsMouse || root.popupOpen ? 0.16 : 0.0)
+    color: Util.alpha(root.animatedAccent, mouse.containsMouse || root.popupOpen ? 0.16 : (root.peeking ? 0.10 : 0.0))
     border.width: mouse.containsMouse || root.popupOpen ? 1 : 0
     border.color: Util.alpha(root.animatedAccent, 0.35)
     opacity: root.running ? 1 : 0.55
-    Behavior on color { ColorAnimation { duration: 180 } }
-    Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+    Behavior on color { ColorAnimation { duration: Style.duration(180) } }
+    Behavior on width { NumberAnimation { duration: Style.duration(260); easing.type: Easing.OutCubic } }
 
     // Shown text lags `pillText` so the swap can animate out and back in.
     property string displayText: root.pillText
 
     function swapTrack() {
       if (displayText === root.pillText) return
-      if (!root.visible) { displayText = root.pillText; return }
+      if (root.running && root.title === "") return   // between tracks: keep the old text
+      if (!root.visible || !root.motion) { displayText = root.pillText; return }
       swapAnim.restart()
+    }
+
+    // Progress through the song, as a hairline along the bottom.
+    Rectangle {
+      anchors.left: parent.left
+      anchors.bottom: parent.bottom
+      anchors.leftMargin: parent.radius * 0.6
+      anchors.bottomMargin: 1
+      visible: root.pillProgress && root.running && root.duration > 0
+      height: Math.max(1, Style.space(2))
+      radius: height / 2
+      width: (parent.width - parent.radius * 1.2) * root.progress
+      opacity: root.volumeFlash > 0 ? 0 : (root.playing ? 0.75 : 0.35)
+      gradient: Gradient {
+        orientation: Gradient.Horizontal
+        GradientStop { position: 0.0; color: root.animatedAccent }
+        GradientStop { position: 1.0; color: root.animatedAccent2 }
+      }
+      Behavior on opacity { NumberAnimation { duration: Style.duration(220) } }
     }
 
     // Spotify volume, briefly, after a scroll.
@@ -344,11 +309,11 @@ BarWidget {
       anchors.bottomMargin: 1
       height: Math.max(2, Style.space(2))
       radius: height / 2
-      width: (parent.width - parent.radius * 1.2) * (root.running ? root.player.volume : 0)
+      width: (parent.width - parent.radius * 1.2) * root.volume
       color: root.animatedAccent
       opacity: root.volumeFlash
-      Behavior on opacity { NumberAnimation { duration: 220 } }
-      Behavior on width { NumberAnimation { duration: 120 } }
+      Behavior on opacity { NumberAnimation { duration: Style.duration(220) } }
+      Behavior on width { NumberAnimation { duration: Style.duration(120) } }
     }
 
     Row {
@@ -356,7 +321,46 @@ BarWidget {
       anchors.centerIn: parent
       spacing: Style.space(8)
 
-      // Live equalizer: three bars on one shared timeline.
+      // Tiny cover: on track change (peek) or always, per `pillCover`.
+      Item {
+        id: thumb
+        readonly property real size: pill.height - Style.space(6)
+        width: root.showThumb ? size : 0
+        height: size
+        visible: width > 0.5
+        anchors.verticalCenter: parent.verticalCenter
+        Behavior on width { NumberAnimation { duration: Style.duration(340); easing.type: Easing.OutBack; easing.overshoot: 1.3 } }
+
+        Item {
+          id: thumbArt
+          anchors.centerIn: parent
+          width: thumb.width
+          height: thumb.width
+          layer.enabled: true
+          layer.effect: MultiEffect {
+            maskEnabled: true
+            maskSource: thumbMask
+          }
+          Rectangle { anchors.fill: parent; color: Util.alpha(root.barFg, 0.15) }
+          Image {
+            anchors.fill: parent
+            source: thumb.visible && root.svc
+              ? (root.svc.artFile !== "" ? "file://" + root.svc.artFile : root.artUrl) : ""
+            sourceSize: Qt.size(64, 64)
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+          }
+        }
+        Item {
+          id: thumbMask
+          anchors.fill: thumbArt
+          layer.enabled: true
+          visible: false
+          Rectangle { anchors.fill: parent; radius: width * 0.28 }
+        }
+      }
+
+      // Equalizer: real levels from the visualizer, or a gentle stand-in.
       Item {
         id: eq
         width: Style.space(13)
@@ -367,84 +371,65 @@ BarWidget {
           from: 0; to: 1
           duration: 1100
           loops: Animation.Infinite
-          running: root.playing && root.visible
+          running: root.playing && root.visible && !root.vizLive && root.motion
         }
         Repeater {
           model: 3
           Rectangle {
-            readonly property real wave: Math.abs(Math.sin((eq.phase + index * 0.37) * Math.PI * (2 + index * 0.6)))
+            required property int index
+            readonly property real wave: root.vizLive
+              ? Model.band(root.levels, index / 3, (index + 1) / 3)
+              : (root.motion ? Math.abs(Math.sin((eq.phase + index * 0.37) * Math.PI * (2 + index * 0.6))) : 0.55)
             x: index * (eq.width / 3)
             width: Math.max(2, Math.round(eq.width / 3) - 1)
             radius: width / 2
             height: root.playing ? eq.height * (0.3 + 0.7 * wave) : eq.height * 0.28
             anchors.bottom: parent.bottom
-            color: root.running ? root.animatedAccent : root.barFg
+            // Each bar runs from one accent at the base to the other at the tip.
+            gradient: Gradient {
+              GradientStop { position: 0.0; color: root.running ? root.animatedAccent2 : root.barFg }
+              GradientStop { position: 1.0; color: root.running ? root.animatedAccent : root.barFg }
+            }
             opacity: root.playing ? 1 : 0.5
-            Behavior on height { enabled: !root.playing; NumberAnimation { duration: 200 } }
+            Behavior on height { enabled: !root.playing; NumberAnimation { duration: Style.duration(200) } }
           }
         }
       }
 
-      Item {
-        id: clipBox
-        readonly property real fullWidth: labelMetrics.advanceWidth
-        readonly property bool overflow: fullWidth > root.maxWidth
-        readonly property bool scrolling: overflow && root.marquee && root.playing && !root.popupOpen
-        width: Math.min(fullWidth, root.maxWidth)
-        height: label.implicitHeight
+      PulseMarquee {
+        id: barLabel
+        width: Math.min(implicitWidth, root.maxWidth)
         anchors.verticalCenter: parent.verticalCenter
-        clip: true
+        text: pill.displayText
+        color: root.barFg
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        font.italic: root.showingLyric
+        active: root.marquee && root.playing && !root.popupOpen
+      }
 
-        TextMetrics {
-          id: labelMetrics
-          font: label.font
-          text: pill.displayText
-        }
-
-        Text {
-          id: label
-          y: 0
-          text: pill.displayText
-          textFormat: Text.PlainText
-          width: clipBox.scrolling ? implicitWidth : clipBox.width
-          elide: clipBox.scrolling ? Text.ElideNone : Text.ElideRight
-          color: root.barFg
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-          onTextChanged: x = 0
-        }
-
-        // Ping-pong marquee with rests at each end.
-        SequentialAnimation {
-          running: clipBox.scrolling
-          loops: Animation.Infinite
-          onRunningChanged: if (!running) label.x = 0
-          PauseAnimation { duration: 1600 }
-          NumberAnimation {
-            target: label; property: "x"; to: -(clipBox.fullWidth - clipBox.width)
-            duration: Math.max(1200, (clipBox.fullWidth - clipBox.width) * 28)
-            easing.type: Easing.InOutSine
-          }
-          PauseAnimation { duration: 1200 }
-          NumberAnimation {
-            target: label; property: "x"; to: 0
-            duration: Math.max(1200, (clipBox.fullWidth - clipBox.width) * 28)
-            easing.type: Easing.InOutSine
-          }
-        }
+      // Sleep timer set.
+      Text {
+        visible: !!root.svc && root.svc.sleepActive
+        anchors.verticalCenter: parent.verticalCenter
+        text: "󰒲"
+        color: Util.alpha(root.barFg, 0.7)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
       }
     }
 
     SequentialAnimation {
       id: swapAnim
+      readonly property Item label: barLabel.content
       ParallelAnimation {
-        NumberAnimation { target: label; property: "y"; to: -label.height * 0.8; duration: 150; easing.type: Easing.InCubic }
-        NumberAnimation { target: label; property: "opacity"; to: 0; duration: 150 }
+        NumberAnimation { target: swapAnim.label; property: "y"; to: -swapAnim.label.height * 0.8; duration: 150; easing.type: Easing.InCubic }
+        NumberAnimation { target: swapAnim.label; property: "opacity"; to: 0; duration: 150 }
       }
-      ScriptAction { script: { pill.displayText = root.pillText; label.y = label.height * 0.8 } }
+      ScriptAction { script: { pill.displayText = root.pillText; swapAnim.label.y = swapAnim.label.height * 0.8 } }
       ParallelAnimation {
-        NumberAnimation { target: label; property: "y"; to: 0; duration: 340; easing.type: Easing.OutBack; easing.overshoot: 1.4 }
-        NumberAnimation { target: label; property: "opacity"; to: 1; duration: 220 }
+        NumberAnimation { target: swapAnim.label; property: "y"; to: 0; duration: 340; easing.type: Easing.OutBack; easing.overshoot: 1.4 }
+        NumberAnimation { target: swapAnim.label; property: "opacity"; to: 1; duration: 220 }
       }
     }
 
@@ -475,9 +460,9 @@ BarWidget {
 
   // ================================================================ CARD
   //
-  // Cover-first: the album cover is the hero, glowing in its own color over a
-  // blurred copy of itself that fills the card. Lyrics flip in on the back of
-  // the cover.
+  // Cover-first: the album cover is the hero, glowing in its own colors over
+  // a blurred copy of itself that fills the card. Lyrics flip in on the back
+  // of the cover.
 
   KeyboardPanel {
     id: card
@@ -500,11 +485,15 @@ BarWidget {
       Keys.onUpPressed: root.nudgeVolume(0.05)
       Keys.onDownPressed: root.nudgeVolume(-0.05)
       Keys.onPressed: function(e) {
-        if (e.key === Qt.Key_N) root.next()
+        if (e.key >= Qt.Key_0 && e.key <= Qt.Key_9) root.seekTo(root.duration * (e.key - Qt.Key_0) / 10)
+        else if (e.key === Qt.Key_N) root.next()
         else if (e.key === Qt.Key_P) root.previous()
         else if (e.key === Qt.Key_S) root.toggleShuffle()
         else if (e.key === Qt.Key_R) root.cycleRepeat()
-        else if (e.key === Qt.Key_L) root.lyricsOn = !root.lyricsOn
+        else if (e.key === Qt.Key_L) root.toggleLyrics()
+        else if (e.key === Qt.Key_Z) { if (root.svc) root.svc.cycleSleep() }
+        else if (e.key === Qt.Key_BracketLeft && root.lyricsOn) { if (root.svc) root.svc.nudgeLyrics(0.5) }
+        else if (e.key === Qt.Key_BracketRight && root.lyricsOn) { if (root.svc) root.svc.nudgeLyrics(-0.5) }
         else return
         e.accepted = true
       }
@@ -544,7 +533,7 @@ BarWidget {
         opacity: 0.9
         // Slow drift keeps the color field alive without a timer.
         NumberAnimation on scale {
-          running: root.popupOpen && root.playing
+          running: root.popupOpen && root.playing && root.motion
           from: 1.0; to: 1.2
           duration: 12000
           loops: Animation.Infinite
@@ -589,254 +578,40 @@ BarWidget {
           origin.y: stage.height / 2
           axis { x: 0; y: 1; z: 0 }
           angle: stage.flipped ? 180 : 0
-          Behavior on angle { NumberAnimation { duration: 620; easing.type: Easing.OutBack; easing.overshoot: 0.9 } }
+          Behavior on angle { NumberAnimation { duration: Style.duration(620); easing.type: Easing.OutBack; easing.overshoot: 0.9 } }
         }
 
-        front: Item {
-          id: front
+        front: PulseCover {
           anchors.fill: parent
-
-          readonly property real coverSize: Math.min(width, height) - Style.space(16)
-          readonly property real coverRadius: Math.max(Style.cornerRadius, Style.space(14))
-
-          // Colored glow under the cover.
-          Rectangle {
-            id: glowSrc
-            anchors.centerIn: cover
-            anchors.verticalCenterOffset: Style.space(10)
-            width: cover.width * 0.86
-            height: cover.height * 0.86
-            radius: front.coverRadius
-            color: root.animatedAccent
-            visible: false
-          }
-          MultiEffect {
-            anchors.fill: glowSrc
-            anchors.margins: -Style.space(30)
-            source: glowSrc
-            autoPaddingEnabled: true
-            blurEnabled: true
-            blur: 1.0
-            blurMax: 48
-            opacity: root.playing ? 0.55 : 0.2
-            scale: cover.scale
-            Behavior on opacity { NumberAnimation { duration: 500 } }
-          }
-
-          // The cover: crossfades between two images on track change, and
-          // breathes back a little while paused.
-          Item {
-            id: cover
-            anchors.centerIn: parent
-            width: front.coverSize
-            height: width
-            scale: root.playing ? 1 : 0.88
-            Behavior on scale { NumberAnimation { duration: 520; easing.type: Easing.OutBack; easing.overshoot: 1.6 } }
-            layer.enabled: true
-            layer.effect: MultiEffect {
-              maskEnabled: true
-              maskSource: coverMask
-            }
-
-            property bool showA: true
-            property string wanted: root.popupOpen ? root.artUrl : ""
-            onWantedChanged: {
-              var next = showA ? imgB : imgA
-              if (wanted === "" || next.source.toString() === wanted) return
-              next.source = wanted
-            }
-            function settle(img) {
-              if (img.status !== Image.Ready || img.source.toString() !== wanted) return
-              showA = img === imgA
-            }
-
-            Rectangle {
-              anchors.fill: parent
-              color: Util.alpha(root.panelFg, 0.08)
-              Text {
-                anchors.centerIn: parent
-                text: "󰝚"
-                color: Util.alpha(root.panelFg, 0.4)
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.displayLarge * 2
-              }
-            }
-            Image {
-              id: imgA
-              anchors.fill: parent
-              sourceSize: Qt.size(512, 512)
-              fillMode: Image.PreserveAspectCrop
-              asynchronous: true
-              opacity: cover.showA && status === Image.Ready ? 1 : 0
-              Behavior on opacity { NumberAnimation { duration: 450; easing.type: Easing.InOutQuad } }
-              onStatusChanged: cover.settle(imgA)
-            }
-            Image {
-              id: imgB
-              anchors.fill: parent
-              sourceSize: Qt.size(512, 512)
-              fillMode: Image.PreserveAspectCrop
-              asynchronous: true
-              opacity: !cover.showA && status === Image.Ready ? 1 : 0
-              Behavior on opacity { NumberAnimation { duration: 450; easing.type: Easing.InOutQuad } }
-              onStatusChanged: cover.settle(imgB)
-            }
-          }
-          Item {
-            id: coverMask
-            anchors.fill: cover
-            layer.enabled: true
-            visible: false
-            Rectangle { anchors.fill: parent; radius: front.coverRadius }
-          }
-
-          // Double-click the cover for lyrics.
-          MouseArea {
-            anchors.fill: cover
-            cursorShape: Qt.PointingHandCursor
-            onDoubleClicked: root.lyricsOn = true
-          }
+          source: root.popupOpen ? root.artUrl : ""
+          playing: root.playing
+          live: root.popupOpen && !stage.flipped
+          vinyl: root.vinyl
+          accent: root.animatedAccent
+          accent2: root.animatedAccent2
+          fg: root.panelFg
+          hole: Commons.Color.background
+          fontFamily: root.fontFamily
+          energy: root.popupOpen ? root.bass : 0
+          onDoubleClicked: { if (root.svc) root.svc.lyricsOn = true }
         }
 
-        back: Item {
-          id: back
+        back: PulseLyrics {
           anchors.fill: parent
-
-          Rectangle {
-            anchors.fill: parent
-            anchors.margins: Style.space(4)
-            radius: Math.max(Style.cornerRadius, Style.space(14))
-            color: Util.alpha(root.animatedAccent, 0.08)
-            border.width: 1
-            border.color: Util.alpha(root.animatedAccent, 0.18)
-          }
-
-          // Lines fade out toward the top and bottom edges.
-          Item {
-            id: lyricsArea
-            anchors.fill: parent
-            anchors.margins: Style.space(18)
-            layer.enabled: true
-            layer.effect: MultiEffect {
-              maskEnabled: true
-              maskSource: fadeMask
-              maskThresholdMin: 0.0
-              maskSpreadAtMin: 1.0
-            }
-
-            ListView {
-              id: lyricsView
-              anchors.fill: parent
-              interactive: false
-              model: stage.lyricsLive ? root.lyricLines : []
-              currentIndex: Math.max(0, root.lyricIdx)
-              preferredHighlightBegin: height * 0.36
-              preferredHighlightEnd: height * 0.36 + Style.space(30)
-              highlightRangeMode: ListView.StrictlyEnforceRange
-              highlightMoveDuration: 520
-              highlightMoveVelocity: -1
-              visible: root.lyricLines.length > 0
-              spacing: Style.space(4)
-
-              delegate: Item {
-                id: line
-                required property var modelData
-                required property int index
-                readonly property bool current: index === root.lyricIdx
-                readonly property int dist: Math.abs(index - Math.max(0, root.lyricIdx))
-                width: lyricsView.width
-                height: lineText.implicitHeight + Style.space(8)
-
-                Text {
-                  id: lineText
-                  width: parent.width
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: line.modelData.text
-                  textFormat: Text.PlainText
-                  wrapMode: Text.WordWrap
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.title + Style.space(3)
-                  font.bold: true
-                  color: line.current ? root.panelFg : Util.alpha(root.panelFg, 0.9)
-                  opacity: line.current ? 1 : Math.max(0.16, 0.5 - line.dist * 0.1)
-                  scale: line.current ? 1 : 0.92
-                  transformOrigin: Item.Left
-                  Behavior on opacity { NumberAnimation { duration: 380; easing.type: Easing.OutCubic } }
-                  Behavior on scale { NumberAnimation { duration: 420; easing.type: Easing.OutBack; easing.overshoot: 1.4 } }
-                }
-
-                // Click a line to jump there.
-                MouseArea {
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: root.seekTo(line.modelData.t)
-                  onEntered: if (!line.current) lineText.opacity = 0.75
-                  onExited: lineText.opacity = Qt.binding(function() { return line.current ? 1 : Math.max(0.16, 0.5 - line.dist * 0.1) })
-                }
-              }
-            }
-          }
-          Item {
-            id: fadeMask
-            anchors.fill: lyricsArea
-            layer.enabled: true
-            visible: false
-            Rectangle {
-              anchors.fill: parent
-              gradient: Gradient {
-                GradientStop { position: 0.0; color: "transparent" }
-                GradientStop { position: 0.16; color: "white" }
-                GradientStop { position: 0.8; color: "white" }
-                GradientStop { position: 1.0; color: "transparent" }
-              }
-            }
-          }
-
-          // Empty / loading states.
-          Column {
-            anchors.centerIn: parent
-            spacing: Style.space(10)
-            visible: root.lyricLines.length === 0
-
-            Row {
-              anchors.horizontalCenter: parent.horizontalCenter
-              spacing: Style.space(6)
-              visible: root.lyricsStatus === "loading"
-              Repeater {
-                model: 3
-                Rectangle {
-                  width: Style.space(8); height: width; radius: width / 2
-                  color: root.animatedAccent
-                  SequentialAnimation on scale {
-                    running: root.lyricsStatus === "loading" && root.popupOpen
-                    loops: Animation.Infinite
-                    PauseAnimation { duration: index * 140 }
-                    NumberAnimation { from: 0.5; to: 1.2; duration: 300; easing.type: Easing.OutQuad }
-                    NumberAnimation { to: 0.5; duration: 300; easing.type: Easing.InQuad }
-                    PauseAnimation { duration: (2 - index) * 140 }
-                  }
-                }
-              }
-            }
-            Text {
-              anchors.horizontalCenter: parent.horizontalCenter
-              visible: root.lyricsStatus !== "loading"
-              text: "󰍡"
-              color: Util.alpha(root.panelFg, 0.35)
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.displayLarge
-            }
-            Text {
-              anchors.horizontalCenter: parent.horizontalCenter
-              text: root.lyricsStatus === "loading" ? "Finding lyrics"
-                : root.lyricsStatus === "error" ? "Couldn't reach lrclib.net"
-                : "No synced lyrics for this song"
-              color: Util.alpha(root.panelFg, 0.55)
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
-          }
+          lines: root.svc ? root.svc.lyricLines : []
+          synced: root.svc ? root.svc.lyricsSynced : true
+          live: stage.lyricsLive
+          index: root.svc ? root.svc.lyricIdx : -1
+          position: root.svc ? root.svc.lyricsPosition : 0
+          status: root.svc ? root.svc.lyricsStatus : ""
+          offset: root.svc ? root.svc.lyricsOffset : 0
+          karaoke: root.karaoke
+          showLoading: root.popupOpen
+          fg: root.panelFg
+          accent: root.animatedAccent
+          accent2: root.animatedAccent2
+          fontFamily: root.fontFamily
+          onSeek: function(t) { root.seekTo(t - (root.svc ? root.svc.lyricsOffset : 0)) }
         }
       }
 
@@ -853,16 +628,15 @@ BarWidget {
           width: parent.width - miniEq.width - Style.space(12)
           spacing: Style.space(3)
 
-          Text {
+          PulseMarquee {
             id: tTitle
             width: parent.width
             text: root.title || "Nothing playing"
-            textFormat: Text.PlainText
-            elide: Text.ElideRight
             color: root.panelFg
             font.family: root.fontFamily
             font.pixelSize: Style.font.title + Style.space(4)
             font.bold: true
+            active: root.popupOpen
           }
           Text {
             id: tArtist
@@ -876,7 +650,7 @@ BarWidget {
           }
         }
 
-        // Little live equalizer where a like button would go.
+        // Little equalizer where a like button would go.
         Item {
           id: miniEq
           anchors.right: parent.right
@@ -888,19 +662,25 @@ BarWidget {
             from: 0; to: 1
             duration: 1100
             loops: Animation.Infinite
-            running: root.playing && root.popupOpen
+            running: root.playing && root.popupOpen && !root.vizLive && root.motion
           }
           Repeater {
             model: 4
             Rectangle {
-              readonly property real wave: Math.abs(Math.sin((miniEq.phase + index * 0.29) * Math.PI * (2 + index * 0.5)))
+              required property int index
+              readonly property real wave: root.vizLive
+                ? Model.band(root.levels, index / 4, (index + 1) / 4)
+                : (root.motion ? Math.abs(Math.sin((miniEq.phase + index * 0.29) * Math.PI * (2 + index * 0.5))) : 0.55)
               x: index * (miniEq.width / 4)
               width: Math.max(2, Math.round(miniEq.width / 4) - 2)
               radius: width / 2
               anchors.bottom: parent.bottom
               height: root.playing ? miniEq.height * (0.25 + 0.75 * wave) : miniEq.height * 0.2
-              color: root.animatedAccent
-              Behavior on height { enabled: !root.playing; NumberAnimation { duration: 220 } }
+              gradient: Gradient {
+                GradientStop { position: 0.0; color: root.animatedAccent2 }
+                GradientStop { position: 1.0; color: root.animatedAccent }
+              }
+              Behavior on height { enabled: !root.playing; NumberAnimation { duration: Style.duration(220) } }
             }
           }
         }
@@ -918,6 +698,7 @@ BarWidget {
           value: root.position
           maximum: Math.max(1, root.duration)
           fill: root.animatedAccent
+          fill2: root.animatedAccent2
           track: Util.alpha(root.panelFg, 0.15)
           enabled: root.running && root.player.canSeek && root.duration > 0
           onReleased: function(v) { root.seekTo(v) }
@@ -931,6 +712,7 @@ BarWidget {
             color: Util.alpha(root.panelFg, 0.55)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+            font.features: { "tnum": 1 }
           }
           Text {
             anchors.right: parent.right
@@ -938,6 +720,7 @@ BarWidget {
             color: Util.alpha(root.panelFg, 0.55)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+            font.features: { "tnum": 1 }
           }
         }
       }
@@ -976,16 +759,19 @@ BarWidget {
             onClicked: root.previous()
           }
 
-          // Play: accent disc that squishes on press and morphs its glyph.
+          // Play: two-tone disc that squishes on press and morphs its glyph.
           Rectangle {
             id: playBtn
             width: Style.space(58)
             height: width
             radius: width / 2
             anchors.verticalCenter: parent.verticalCenter
-            color: root.animatedAccent
+            gradient: Gradient {
+              GradientStop { position: 0.0; color: root.animatedAccent }
+              GradientStop { position: 1.0; color: root.animatedAccent2 }
+            }
             scale: playMouse.pressed ? 0.86 : (playMouse.containsMouse ? 1.07 : 1)
-            Behavior on scale { NumberAnimation { duration: 240; easing.type: Easing.OutBack; easing.overshoot: 3 } }
+            Behavior on scale { NumberAnimation { duration: Style.duration(240); easing.type: Easing.OutBack; easing.overshoot: 3 } }
 
             // Pulse ring while playing.
             Rectangle {
@@ -997,10 +783,10 @@ BarWidget {
               radius: width / 2
               color: "transparent"
               border.width: Style.space(2)
-              border.color: root.animatedAccent
+              border.color: root.animatedAccent2
               opacity: 0
               SequentialAnimation {
-                running: root.playing && root.popupOpen
+                running: root.playing && root.popupOpen && root.motion
                 loops: Animation.Infinite
                 onRunningChanged: if (!running) { pulseRing.opacity = 0; pulseRing.scale = 1 }
                 ParallelAnimation {
@@ -1018,7 +804,7 @@ BarWidget {
               color: Commons.Color.background
               font.family: root.fontFamily
               font.pixelSize: Style.font.iconLarge + Style.space(8)
-              onTextChanged: glyphMorph.restart()
+              onTextChanged: if (root.motion) glyphMorph.restart()
             }
             SequentialAnimation {
               id: glyphMorph
@@ -1071,7 +857,7 @@ BarWidget {
         height: volSlider.implicitHeight
         visible: root.running && root.player.volumeSupported
 
-        readonly property real v: root.running ? root.player.volume : 0
+        readonly property real v: root.volume
         property real restore: 0.5
 
         Text {
@@ -1119,8 +905,29 @@ BarWidget {
         }
       }
 
+      // ---- Recently played ------------------------------------------------
+      PulseHistory {
+        id: historyStrip
+        width: parent.width
+        visible: root.historyOn && items.length > 0
+        items: {
+          var s = root.svc
+          if (!s || !root.historyOn) return []
+          var out = []
+          for (var i = 0; i < s.history.length; i++)
+            if (s.history[i].uri !== s.trackUri) out.push(s.history[i])
+          return out
+        }
+        live: root.popupOpen
+        fg: root.panelFg
+        accent: root.animatedAccent
+        fontFamily: root.fontFamily
+        onPlay: function(uri) { if (root.svc) root.svc.playUri(uri) }
+      }
+
       // ---- Footer ---------------------------------------------------------
       Item {
+        id: footer
         width: parent.width
         height: lyricsChip.implicitHeight
 
@@ -1133,12 +940,24 @@ BarWidget {
           accent: root.animatedAccent
           fontFamily: root.fontFamily
           active: root.lyricsOn
-          onClicked: root.lyricsOn = !root.lyricsOn
+          onClicked: root.toggleLyrics()
+        }
+        // Sleep: off → 15 → 30 → 60 min → end of track → off.
+        PulseChip {
+          readonly property var s: root.svc
+          anchors.horizontalCenter: parent.horizontalCenter
+          icon: "󰒲"
+          label: !s || !s.sleepActive ? "Sleep" : (s.sleepEndOfTrack ? "After song" : s.sleepLeft + " min")
+          fg: root.panelFg
+          accent: root.animatedAccent
+          fontFamily: root.fontFamily
+          active: !!s && s.sleepActive
+          onClicked: if (s) s.cycleSleep()
         }
         PulseChip {
           anchors.right: parent.right
           icon: "󰓇"
-          label: "Open Spotify"
+          label: "Spotify"
           fg: root.panelFg
           accent: root.spotifyGreen
           fontFamily: root.fontFamily
@@ -1146,7 +965,6 @@ BarWidget {
         }
       }
     }
-
   }
 
   // ---- Motion -----------------------------------------------------------
@@ -1154,24 +972,31 @@ BarWidget {
   // Opening: the stage pops in, then the rest cascades up.
   ParallelAnimation {
     id: introAnim
-    NumberAnimation { target: stage; property: "opacity"; from: 0; to: 1; duration: 260 }
-    NumberAnimation { target: stage; property: "scale"; from: 0.9; to: 1; duration: 560; easing.type: Easing.OutBack; easing.overshoot: 1.4 }
+    NumberAnimation { target: stage; property: "opacity"; from: 0; to: 1; duration: Style.duration(260) }
+    NumberAnimation { target: stage; property: "scale"; from: 0.9; to: 1; duration: Style.duration(560); easing.type: Easing.OutBack; easing.overshoot: 1.4 }
     SequentialAnimation {
-      PauseAnimation { duration: 80 }
+      PauseAnimation { duration: Style.duration(80) }
       ParallelAnimation {
-        NumberAnimation { target: info; property: "opacity"; from: 0; to: 1; duration: 300 }
-        NumberAnimation { target: infoShift; property: "y"; from: Style.space(14); to: 0; duration: 420; easing.type: Easing.OutCubic }
+        NumberAnimation { target: info; property: "opacity"; from: 0; to: 1; duration: Style.duration(300) }
+        NumberAnimation { target: infoShift; property: "y"; from: Style.space(14); to: 0; duration: Style.duration(420); easing.type: Easing.OutCubic }
       }
     }
     SequentialAnimation {
-      PauseAnimation { duration: 150 }
-      NumberAnimation { target: seek; property: "opacity"; from: 0; to: root.duration > 0 ? 1 : 0.4; duration: 300 }
+      PauseAnimation { duration: Style.duration(150) }
+      NumberAnimation { target: seek; property: "opacity"; from: 0; to: root.duration > 0 ? 1 : 0.4; duration: Style.duration(300) }
     }
     SequentialAnimation {
-      PauseAnimation { duration: 210 }
+      PauseAnimation { duration: Style.duration(210) }
       ParallelAnimation {
-        NumberAnimation { target: transport; property: "opacity"; from: 0; to: 1; duration: 300 }
-        NumberAnimation { target: transport; property: "scale"; from: 0.92; to: 1; duration: 420; easing.type: Easing.OutBack; easing.overshoot: 2 }
+        NumberAnimation { target: transport; property: "opacity"; from: 0; to: 1; duration: Style.duration(300) }
+        NumberAnimation { target: transport; property: "scale"; from: 0.92; to: 1; duration: Style.duration(420); easing.type: Easing.OutBack; easing.overshoot: 2 }
+      }
+    }
+    SequentialAnimation {
+      PauseAnimation { duration: Style.duration(270) }
+      ParallelAnimation {
+        NumberAnimation { target: historyStrip; property: "opacity"; from: 0; to: 1; duration: Style.duration(300) }
+        NumberAnimation { target: footer; property: "opacity"; from: 0; to: 1; duration: Style.duration(300) }
       }
     }
   }
@@ -1180,17 +1005,15 @@ BarWidget {
   SequentialAnimation {
     id: trackAnim
     ParallelAnimation {
-      NumberAnimation { target: tTitle; property: "opacity"; from: 0; to: 1; duration: 320 }
-      NumberAnimation { target: tTitle; property: "x"; from: Style.space(18); to: 0; duration: 440; easing.type: Easing.OutCubic }
+      NumberAnimation { target: tTitle; property: "opacity"; from: 0; to: 1; duration: Style.duration(320) }
+      NumberAnimation { target: tTitle; property: "x"; from: Style.space(18); to: 0; duration: Style.duration(440); easing.type: Easing.OutCubic }
       SequentialAnimation {
-        PauseAnimation { duration: 90 }
+        PauseAnimation { duration: Style.duration(90) }
         ParallelAnimation {
-          NumberAnimation { target: tArtist; property: "opacity"; from: 0; to: 1; duration: 320 }
-          NumberAnimation { target: tArtist; property: "x"; from: Style.space(18); to: 0; duration: 440; easing.type: Easing.OutCubic }
+          NumberAnimation { target: tArtist; property: "opacity"; from: 0; to: 1; duration: Style.duration(320) }
+          NumberAnimation { target: tArtist; property: "x"; from: Style.space(18); to: 0; duration: Style.duration(440); easing.type: Easing.OutCubic }
         }
       }
     }
   }
-
-  onPopupOpenChanged: if (popupOpen) { introAnim.restart(); if (running) player.positionChanged() }
 }

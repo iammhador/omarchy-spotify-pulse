@@ -21,9 +21,9 @@ Rectangle {
   border.width: 1
   border.color: c.active ? Util.alpha(c.accent, 0.5) : Util.alpha(c.fg, 0.10)
   scale: area.pressed ? 0.94 : 1
-  Behavior on color { ColorAnimation { duration: 200 } }
-  Behavior on border.color { ColorAnimation { duration: 200 } }
-  Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutBack; easing.overshoot: 3 } }
+  Behavior on color { ColorAnimation { duration: Style.duration(200) } }
+  Behavior on border.color { ColorAnimation { duration: Style.duration(200) } }
+  Behavior on scale { NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutBack; easing.overshoot: 3 } }
 
   Row {
     id: row
@@ -36,7 +36,7 @@ Rectangle {
       font.family: c.fontFamily
       font.pixelSize: Style.font.body
       color: c.active ? c.accent : c.fg
-      Behavior on color { ColorAnimation { duration: 200 } }
+      Behavior on color { ColorAnimation { duration: Style.duration(200) } }
     }
     Text {
       anchors.verticalCenter: parent.verticalCenter
@@ -45,7 +45,7 @@ Rectangle {
       font.family: c.fontFamily
       font.pixelSize: Style.font.bodySmall
       color: c.active ? c.accent : Util.alpha(c.fg, 0.85)
-      Behavior on color { ColorAnimation { duration: 200 } }
+      Behavior on color { ColorAnimation { duration: Style.duration(200) } }
     }
   }
 

@@ -9,6 +9,8 @@ Item {
   property real value: 0
   property real maximum: 1
   property color fill: "white"
+  // End color of the filled part; the fill blends from `fill` to this.
+  property color fill2: fill
   property color track: Qt.rgba(1, 1, 1, 0.15)
   // Emit `moved` continuously while dragging (volume) or only on release (seek).
   property bool live: false
@@ -31,16 +33,20 @@ Item {
     height: s.hot ? Style.space(6) : Style.space(4)
     radius: height / 2
     color: s.track
-    Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    Behavior on height { NumberAnimation { duration: Style.duration(160); easing.type: Easing.OutCubic } }
 
     Rectangle {
       height: parent.height
       radius: height / 2
       width: Math.max(height, parent.width * s.fraction)
-      color: s.fill
+      gradient: Gradient {
+        orientation: Gradient.Horizontal
+        GradientStop { position: 0.0; color: s.fill }
+        GradientStop { position: 1.0; color: s.fill2 }
+      }
       Behavior on width {
         enabled: !s.dragging
-        NumberAnimation { duration: 260; easing.type: Easing.Linear }
+        NumberAnimation { duration: Style.duration(260); easing.type: Easing.Linear }
       }
     }
   }
@@ -51,11 +57,11 @@ Item {
     radius: width / 2
     x: bed.width * s.fraction - width / 2
     anchors.verticalCenter: parent.verticalCenter
-    color: s.fill
-    Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutBack; easing.overshoot: 2.5 } }
+    color: s.fill2
+    Behavior on width { NumberAnimation { duration: Style.duration(200); easing.type: Easing.OutBack; easing.overshoot: 2.5 } }
     Behavior on x {
       enabled: !s.dragging
-      NumberAnimation { duration: 260; easing.type: Easing.Linear }
+      NumberAnimation { duration: Style.duration(260); easing.type: Easing.Linear }
     }
   }
 

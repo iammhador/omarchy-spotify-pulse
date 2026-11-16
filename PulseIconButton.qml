@@ -18,7 +18,7 @@ Item {
   implicitWidth: Style.space(38)
   implicitHeight: Style.space(38)
   opacity: enabled ? 1 : 0.3
-  Behavior on opacity { NumberAnimation { duration: 200 } }
+  Behavior on opacity { NumberAnimation { duration: Style.duration(200) } }
 
   Text {
     id: glyph
@@ -30,9 +30,9 @@ Item {
     color: b.active ? b.accent : b.color
     opacity: b.active || area.containsMouse ? 1 : 0.78
     scale: area.pressed ? 0.82 : (area.containsMouse ? 1.16 : 1)
-    Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutBack; easing.overshoot: 3 } }
-    Behavior on color { ColorAnimation { duration: 220 } }
-    Behavior on opacity { NumberAnimation { duration: 160 } }
+    Behavior on scale { NumberAnimation { duration: Style.duration(220); easing.type: Easing.OutBack; easing.overshoot: 3 } }
+    Behavior on color { ColorAnimation { duration: Style.duration(220) } }
+    Behavior on opacity { NumberAnimation { duration: Style.duration(160) } }
   }
 
   Rectangle {
@@ -44,7 +44,7 @@ Item {
     radius: width / 2
     color: b.accent
     scale: b.active ? 1 : 0
-    Behavior on scale { NumberAnimation { duration: 260; easing.type: Easing.OutBack; easing.overshoot: 3 } }
+    Behavior on scale { NumberAnimation { duration: Style.duration(260); easing.type: Easing.OutBack; easing.overshoot: 3 } }
   }
 
   MouseArea {
