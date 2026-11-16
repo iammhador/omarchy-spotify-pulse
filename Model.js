@@ -167,6 +167,63 @@ function mix(a, b, t, QtRef) {
                     a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t)
 }
 
+// ---------------------------------------------------------------- shapes
+
+// Points along a rounded rectangle's outline, from the top middle going
+// clockwise, stopping at `fraction` (0..1) of the way round. For a progress
+// stroke drawn with PathPolyline. `inset` keeps a stroke inside w × h.
+function outlinePoints(w, h, r, inset, fraction, QtRef) {
+  var x0 = inset, y0 = inset, x1 = w - inset, y1 = h - inset
+  var rad = Math.max(0, Math.min(r, (x1 - x0) / 2, (y1 - y0) / 2))
+  var cx = w / 2
+  function line(ax, ay, bx, by) {
+    return { len: Math.hypot(bx - ax, by - ay), at: function(t) { return [ax + (bx - ax) * t, ay + (by - ay) * t] }, steps: 1 }
+  }
+  function arc(ox, oy, a0) {
+    // Quarter circle clockwise (screen coordinates) starting at angle a0.
+    return { len: Math.PI * rad / 2, steps: 6, at: function(t) {
+      var a = a0 + t * Math.PI / 2
+      return [ox + rad * Math.cos(a), oy + rad * Math.sin(a)]
+    } }
+  }
+  var segs = [
+    line(cx, y0, x1 - rad, y0),
+    arc(x1 - rad, y0 + rad, -Math.PI / 2),
+    line(x1, y0 + rad, x1, y1 - rad),
+    arc(x1 - rad, y1 - rad, 0),
+    line(x1 - rad, y1, x0 + rad, y1),
+    arc(x0 + rad, y1 - rad, Math.PI / 2),
+    line(x0, y1 - rad, x0, y0 + rad),
+    arc(x0 + rad, y0 + rad, Math.PI),
+    line(x0 + rad, y0, cx, y0)
+  ]
+  var total = 0
+  for (var i = 0; i < segs.length; i++) total += segs[i].len
+  var left = clamp(fraction, 0, 1) * total
+  var pts = [QtRef.point(cx, y0)]
+  for (var s = 0; s < segs.length && left > 0; s++) {
+    var seg = segs[s]
+    var upto = seg.len > 0 ? Math.min(1, left / seg.len) : 1
+    for (var k = 1; k <= seg.steps; k++) {
+      var t = Math.min(upto, k / seg.steps)
+      var p = seg.at(t)
+      pts.push(QtRef.point(p[0], p[1]))
+      if (t >= upto) break
+    }
+    left -= seg.len
+  }
+  return pts
+}
+
+// "<1 m", "14 m", "1 h 12 m", "2 h".
+function formatListening(seconds) {
+  var m = Math.floor(Math.max(0, Number(seconds) || 0) / 60)
+  if (m < 1) return "<1 m"
+  var h = Math.floor(m / 60)
+  if (h === 0) return m + " m"
+  return m % 60 ? h + " h " + (m % 60) + " m" : h + " h"
+}
+
 // ---------------------------------------------------------------- spotify
 
 // spotify:track:<id> from the track's open.spotify.com URL (or its MPRIS

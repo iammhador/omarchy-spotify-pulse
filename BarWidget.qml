@@ -107,7 +107,9 @@ BarWidget {
   readonly property bool visualizer: flag("visualizer", true)
   readonly property bool historyOn: flag("history", true)
   readonly property bool karaoke: flag("karaoke", true)
-  readonly property string pillCover: choice("pillCover", "peek", ["peek", "always", "off"])
+  // "cover": the album art with progress around it. "wave": a wave in a ring,
+  // with the new cover peeking in on track change.
+  readonly property string barStyle: choice("barStyle", "cover", ["cover", "wave"])
   readonly property bool pillProgress: flag("pillProgress", true)
   readonly property bool vinyl: choice("coverStyle", "square", ["square", "vinyl"]) === "vinyl"
 
@@ -201,7 +203,7 @@ BarWidget {
   onTrackKeyChanged: {
     if (popupOpen) trackAnim.restart()
     if (title === "") return
-    if (lastTrack !== "" && lastTrack !== trackKey && pillCover === "peek" && running && !popupOpen) {
+    if (lastTrack !== "" && lastTrack !== trackKey && barStyle === "wave" && running && !popupOpen) {
       peeking = true
       peekTimer.restart()
     }
@@ -258,12 +260,13 @@ BarWidget {
   readonly property string pillText: !running ? "Open Spotify" : (showingLyric ? lyricText : trackText)
   onPillTextChanged: pill.swapTrack()
 
-  readonly property bool showThumb: running && (pillCover === "always" || (pillCover === "peek" && peeking))
+  readonly property bool showThumb: running && barStyle === "wave" && peeking
 
   Rectangle {
     id: pill
     anchors.verticalCenter: parent.verticalCenter
-    height: Math.round(root.barSize * 0.72)
+    // A little taller in cover style, so the art reads at bar size.
+    height: Math.round(root.barSize * (root.barStyle === "cover" && root.running ? 0.86 : 0.72))
     width: pillRow.width + Style.space(18)
     radius: height / 2
     color: Util.alpha(root.animatedAccent, mouse.containsMouse || root.popupOpen ? 0.16 : (root.peeking ? 0.10 : 0.0))
@@ -288,7 +291,25 @@ BarWidget {
       anchors.centerIn: parent
       spacing: Style.space(8)
 
-      // Tiny cover: on track change (peek) or always, per `pillCover`.
+      // Cover style: the album art with progress around its four sides.
+      PulseBarCover {
+        visible: root.barStyle === "cover" && root.running
+        width: pill.height - Style.space(2)
+        height: width
+        anchors.verticalCenter: parent.verticalCenter
+        source: visible ? root.artUrl : ""
+        track: root.trackKey
+        playing: root.playing
+        live: root.visible
+        showOutline: root.pillProgress && root.duration > 0
+        volumeMode: root.volumeFlash > 0
+        fraction: volumeMode ? root.volume : root.progress
+        levels: root.vizLive ? root.levels : []
+        fg: root.barFg
+        accent: root.animatedAccent
+      }
+
+      // Wave style, on track change: the new cover peeks in briefly.
       Item {
         id: thumb
         readonly property real size: pill.height - Style.space(6)
@@ -331,6 +352,7 @@ BarWidget {
       // plays. Right after a scroll the ring shows Spotify's volume instead.
       Item {
         id: eqRing
+        visible: root.barStyle === "wave" || !root.running
         readonly property bool showVolume: root.volumeFlash > 0 && root.running
         readonly property bool shown: showVolume || (root.pillProgress && root.running && root.duration > 0)
         readonly property real fraction: showVolume ? root.volume : root.progress

@@ -41,4 +41,19 @@ const c = (h, s, l) => ({hslHue: h, hslSaturation: s, hslLightness: l});
 let p = accentPair([c(0.05, 0.8, 0.5), c(0.55, 0.7, 0.45)], true, Q); assert.ok(Math.abs(p.a.h - 0.05) < 1e-9 && Math.abs(p.b.h - 0.55) < 1e-9);
 p = accentPair([c(0.05, 0.8, 0.5), c(0.06, 0.6, 0.4)], true, Q); assert.ok(Math.abs(p.b.h - 0.12) < 1e-9, 'analogous shift');
 assert.equal(accentPair([c(-1, 0, 0.5)], true, Q), null);
+// outlinePoints: 20×20 box, radius 4, no inset
+const P = { point: (x, y) => ({x, y}) };
+const near = (a, b) => Math.abs(a - b) < 1e-6;
+let o = outlinePoints(20, 20, 4, 0, 0, P); assert.equal(o.length, 1); assert.ok(near(o[0].x, 10) && near(o[0].y, 0), 'starts top middle');
+o = outlinePoints(20, 20, 4, 0, 1, P); let last = o[o.length - 1]; assert.ok(near(last.x, 10) && near(last.y, 0), 'full loop ends where it began');
+const per = 4 * 12 + 2 * Math.PI * 4;  // straight sides + corners
+o = outlinePoints(20, 20, 4, 0, (6 + Math.PI * 2 + 6) / per, P); last = o[o.length - 1];
+assert.ok(near(last.x, 20) && near(last.y, 10), 'quarter way is the right-side middle: ' + JSON.stringify(last));
+o = outlinePoints(20, 20, 4, 0, 0.5, P); last = o[o.length - 1]; assert.ok(near(last.x, 10) && near(last.y, 20), 'half way is the bottom middle');
+o = outlinePoints(20, 20, 4, 2, 1, P); assert.ok(o.every(p => p.x >= 2 - 1e-9 && p.x <= 18 + 1e-9 && p.y >= 2 - 1e-9 && p.y <= 18 + 1e-9), 'inset respected');
+o = outlinePoints(20, 20, 50, 0, 0.25, P); assert.ok(o.every(p => isFinite(p.x) && isFinite(p.y)), 'oversized radius clamps');
+// formatListening
+assert.equal(formatListening(0), "<1 m"); assert.equal(formatListening(59), "<1 m");
+assert.equal(formatListening(14 * 60 + 5), "14 m"); assert.equal(formatListening(72 * 60), "1 h 12 m");
+assert.equal(formatListening(7200), "2 h"); assert.equal(formatListening(NaN), "<1 m");
 console.log("all Model.js tests passed");
