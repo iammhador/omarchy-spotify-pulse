@@ -144,6 +144,7 @@ BarWidget {
     volumeFlash = 1
     volumeFlashTimer.restart()
   }
+  function nudgeVolume(delta) { if (running) setVolume(player.volume + delta) }
   function toggleShuffle() { if (running && player.shuffleSupported) player.shuffle = !player.shuffle }
   function cycleRepeat() {
     if (!running || !player.loopSupported) return
@@ -173,11 +174,17 @@ BarWidget {
   property string lyricsStatus: ""   // "", "loading", "none", "error"
   property string lyricsKey: ""
   property var lyricsCache: ({})
+  readonly property int lyricsCacheMax: 50
   readonly property int lyricIdx: lyricLines.length ? Model.lyricIndex(lyricLines, position) : -1
+
+  // Only the newest request may report back; anything older is stale.
+  property int lyricsReq: 0
+  property var lyricsXhr: null
 
   function loadLyrics() {
     if (!lyricsOn || !running || title === "") return
     if (lyricsKey === trackKey) return
+    cancelLyricsFetch()
     var key = trackKey
     lyricsKey = key
     if (lyricsCache[key] !== undefined) {
@@ -191,17 +198,29 @@ BarWidget {
       track_name: title, artist_name: artist, album_name: album,
       duration: duration > 0 ? Math.round(duration) : ""
     })
-    fetchLyrics("https://lrclib.net/api/get?" + q, key, function() {
-      // Exact match failed: fall back to a looser search.
-      fetchLyrics("https://lrclib.net/api/search?" + Model.encodeQuery({ track_name: title, artist_name: artist }), key, null)
+    var searchUrl = "https://lrclib.net/api/search?" + Model.encodeQuery({ track_name: title, artist_name: artist })
+    fetchLyrics("https://lrclib.net/api/get?" + q, function() {
+      // No exact match (or lrclib hiccuped): fall back to a looser search.
+      fetchLyrics(searchUrl, null)
     })
   }
 
-  function fetchLyrics(url, key, onMiss) {
+  function cancelLyricsFetch() {
+    lyricsReq++
+    lyricsTimeout.stop()
+    var xhr = lyricsXhr
+    lyricsXhr = null
+    if (xhr) xhr.abort()
+  }
+
+  function fetchLyrics(url, onMiss) {
+    var req = ++lyricsReq
+    var key = lyricsKey
     var xhr = new XMLHttpRequest()
     xhr.onreadystatechange = function() {
-      if (xhr.readyState !== XMLHttpRequest.DONE) return
-      if (key !== root.lyricsKey) return   // track changed meanwhile
+      if (xhr.readyState !== XMLHttpRequest.DONE || req !== root.lyricsReq) return
+      lyricsTimeout.stop()
+      root.lyricsXhr = null
       var synced = ""
       if (xhr.status === 200) {
         try {
@@ -213,16 +232,42 @@ BarWidget {
           }
         } catch (e) {}
       }
-      if (!synced && onMiss && (xhr.status === 200 || xhr.status === 404)) { onMiss(); return }
-      var lines = Model.parseLrc(synced)
-      var cache = root.lyricsCache
-      cache[key] = lines
-      root.lyricsCache = cache
-      root.lyricLines = lines
-      root.lyricsStatus = lines.length ? "" : (xhr.status === 0 ? "error" : "none")
+      // Status 0 means lrclib is unreachable, so a second request would fail too.
+      if (!synced && onMiss && xhr.status !== 0) { onMiss(); return }
+      root.applyLyrics(key, Model.parseLrc(synced), xhr.status !== 200 && xhr.status !== 404)
     }
+    lyricsXhr = xhr
     xhr.open("GET", url)
     xhr.send()
+    lyricsTimeout.restart()
+  }
+
+  function applyLyrics(key, lines, failed) {
+    if (key !== lyricsKey) return
+    lyricLines = lines
+    if (failed) {
+      // Not cached, so turning lyrics back on (or replaying the song) retries.
+      lyricsStatus = "error"
+      lyricsKey = ""
+      return
+    }
+    var cache = lyricsCache
+    cache[key] = lines
+    var keys = Object.keys(cache)   // insertion order, oldest first
+    for (var i = 0; i < keys.length - lyricsCacheMax; i++) delete cache[keys[i]]
+    lyricsCache = cache
+    lyricsStatus = lines.length ? "" : "none"
+  }
+
+  // An lrclib request that hangs ends as an error instead of loading forever.
+  Timer {
+    id: lyricsTimeout
+    interval: 8000
+    onTriggered: {
+      var key = root.lyricsKey
+      root.cancelLyricsFetch()
+      root.applyLyrics(key, [], true)
+    }
   }
 
   onLyricsOnChanged: loadLyrics()
@@ -417,7 +462,7 @@ BarWidget {
       onWheel: function(w) {
         if (!root.running) return
         var up = w.angleDelta.y > 0
-        if (root.scrollAction === "volume") root.setVolume(root.player.volume + (up ? 0.05 : -0.05))
+        if (root.scrollAction === "volume") root.nudgeVolume(up ? 0.05 : -0.05)
         else if (root.scrollAction === "track") { if (up) root.previous(); else root.next() }
       }
       onEntered: if (root.bar && !root.popupOpen) root.bar.showTooltip(root, root.running
@@ -452,8 +497,8 @@ BarWidget {
       Keys.onSpacePressed: root.playPause()
       Keys.onLeftPressed: root.seekTo(root.position - 5)
       Keys.onRightPressed: root.seekTo(root.position + 5)
-      Keys.onUpPressed: root.setVolume(root.player.volume + 0.05)
-      Keys.onDownPressed: root.setVolume(root.player.volume - 0.05)
+      Keys.onUpPressed: root.nudgeVolume(0.05)
+      Keys.onDownPressed: root.nudgeVolume(-0.05)
       Keys.onPressed: function(e) {
         if (e.key === Qt.Key_N) root.next()
         else if (e.key === Qt.Key_P) root.previous()
@@ -535,8 +580,11 @@ BarWidget {
         width: parent.width
         height: Math.round(width * 0.9)
         readonly property bool flipped: root.lyricsOn
+        // Keep the lyrics populated until the back has turned away.
+        readonly property bool lyricsLive: flipped || flipRot.angle > 90
 
         transform: Rotation {
+          id: flipRot
           origin.x: stage.width / 2
           origin.y: stage.height / 2
           axis { x: 0; y: 1; z: 0 }
@@ -680,7 +728,7 @@ BarWidget {
               id: lyricsView
               anchors.fill: parent
               interactive: false
-              model: stage.flipped || root.lyricsOn ? root.lyricLines : []
+              model: stage.lyricsLive ? root.lyricLines : []
               currentIndex: Math.max(0, root.lyricIdx)
               preferredHighlightBegin: height * 0.36
               preferredHighlightEnd: height * 0.36 + Style.space(30)
@@ -797,6 +845,8 @@ BarWidget {
         id: info
         width: parent.width
         height: infoCol.implicitHeight
+        // The Column owns `y`, so the intro slides this offset instead.
+        transform: Translate { id: infoShift }
 
         Column {
           id: infoCol
@@ -1110,7 +1160,7 @@ BarWidget {
       PauseAnimation { duration: 80 }
       ParallelAnimation {
         NumberAnimation { target: info; property: "opacity"; from: 0; to: 1; duration: 300 }
-        NumberAnimation { target: info; property: "y"; from: info.y + Style.space(14); to: info.y; duration: 420; easing.type: Easing.OutCubic }
+        NumberAnimation { target: infoShift; property: "y"; from: Style.space(14); to: 0; duration: 420; easing.type: Easing.OutCubic }
       }
     }
     SequentialAnimation {
