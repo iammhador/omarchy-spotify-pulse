@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.iammhador.spotify-pulse",
   "name": "Spotify Pulse",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "iammhador",
   "license": "MIT",
   "description": "An animated Spotify player for the bar: Song — Artist, album-colored player card, karaoke lyrics, real audio visualizer, recently played and a sleep timer",

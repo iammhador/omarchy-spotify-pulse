@@ -5,7 +5,7 @@ An animated Spotify player for the [Omarchy](https://omarchy.org) bar.
 The album cover and **Song — Artist** live in your bar, with the song's progress drawn around the cover. Click it for a player card that takes on the colors of whatever's playing: karaoke lyrics, a real audio visualizer, swipe-to-skip, a like button, recently played, a sleep timer and a shareable "Now playing" image.
 
 <p align="center">
-  <img src="assets/demo.gif" alt="Spotify Pulse demo: the player card opens with a large glowing album cover, crossfades to the next track as the whole card shifts from orange to teal, the cover sinks back on pause, and the cover flips over to the lyrics side" width="360">
+  <img src="assets/demo.gif" alt="Spotify Pulse demo: the bar shows a sunset album cover with progress around it; hovering shows a preview; the card opens with the glowing cover, flips to lyrics with the current line filling in orange, then crossfades to a teal and a green album as the whole card changes color; a sleep timer is set" width="360">
 </p>
 
 **Contents:** [Install](#install) · [Quick start](#quick-start) · [The bar](#the-bar) · [The card](#the-card) · [Controls](#controls) · [Settings](#settings) · [Commands](#commands) · [Keyboard shortcuts](#keyboard-shortcuts-for-your-desktop) · [Visualizer](#visualizer) · [Troubleshooting](#troubleshooting) · [Privacy](#privacy) · [Limitations](#limitations) · [Uninstall](#uninstall)
@@ -68,6 +68,10 @@ It hides itself when Spotify isn't running (or shows a dim "Open Spotify" button
 
 ## The card
 
+<p align="center">
+  <img src="preview.png" alt="Two Spotify Pulse cards side by side: one shows the lyrics side with the current line filling in orange over a sunset-tinted card; the other shows a teal moon cover tinting the whole card teal, with a progress ring around the play button and recently played covers below" width="520">
+</p>
+
 ### Look
 - **Cover-first:** a big album cover glowing in its own colors, over a blurred copy of itself that tints the whole card. Or a spinning record with `coverStyle vinyl`.
 - **Two-color album theme:** two colors are taken from each cover. The glow, seek bar, play button and wave use them, and fade smoothly between tracks.
@@ -86,6 +90,7 @@ It hides itself when Spotify isn't running (or shows a dim "Open Spotify" button
 - **Timing off?** Press `[` to show lyrics sooner or `]` for later, half a second at a time. It resets on the next song.
 - **No synced version?** You still get the plain lyrics to scroll through.
 - Lyrics come from [lrclib.net](https://lrclib.net), a free community lyrics database, and are only looked up when you ask (see [Privacy](#privacy)).
+- **Your own lyrics:** for a song lrclib doesn't have (or gets wrong), save them as `~/.local/share/spotify-pulse/lyrics/Artist - Title.lrc` (synced, `[mm:ss.xx] line`) or `.txt` (plain). Use the artist and title exactly as the card shows them, leaving out characters like `/ : ? *`. Your file always wins, and nothing is sent anywhere for that song. Already looked at the song this session? Restart the shell to pick up the new file.
 
 ### ♡ Like
 - Click the heart next to the title, or press `H`: the song is added to (or removed from) your **Liked Songs**. Free accounts work.
@@ -217,7 +222,7 @@ cava listens to your system's audio output, so it reacts to whatever is playing,
 | Nothing changed after installing or updating | Run `omarchy restart shell`. |
 | Nothing in the bar | Spotify Pulse follows the **Spotify desktop app** only (not the web player). Start it, or set `showWhenClosed true`. |
 | Card colors are gray | That cover has little color, so your Omarchy accent is used. Check `albumColors` is on. |
-| "No lyrics for this song" | lrclib.net doesn't have it yet. Anyone can add lyrics there. |
+| "No lyrics for this song" | lrclib.net doesn't have it yet. Anyone can add lyrics there, or save your own `.lrc` file (see [Lyrics](#lyrics)). |
 | "Couldn't reach lrclib.net" | You're offline or lrclib is down. Turn Lyrics off and on to retry. |
 | Lyrics run early or late | Press `[` or `]` with the card open. |
 | Waves don't follow the music | Install cava (`omarchy pkg add cava`). `omarchy-shell spotify-pulse status` shows `"visualizer": "no-cava"` without it. |
@@ -255,7 +260,7 @@ Shared images in `~/Pictures/Spotify Pulse/` are yours to keep or delete. If you
 
 ## Credits
 
-Spotify player detection is adapted from [Spotify Mini](https://github.com/LainsMain/omarchy-spotify-mini) by LainsMain (MIT). The demo uses made-up tracks and generated covers, and shows the 1.0 design.
+Spotify player detection is adapted from [Spotify Mini](https://github.com/LainsMain/omarchy-spotify-mini) by LainsMain (MIT). The demo and screenshot use made-up songs, generated covers and original lyrics.
 
 ## License
 
