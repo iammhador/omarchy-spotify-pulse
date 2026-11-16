@@ -144,6 +144,10 @@ BarWidget {
 
   property bool popupOpen: false
   readonly property bool opened: popupOpen
+  // The bar underlines a widget while its panel is open. This one's cover and
+  // card already show that, so ask for a zero-length mark (the bar rounds it).
+  readonly property real openPanelIndicatorWidth: 0.01
+  readonly property real openPanelIndicatorHeight: 0.01
   property real volumeFlash: 0
 
   function open() { if (running) popupOpen = true }
