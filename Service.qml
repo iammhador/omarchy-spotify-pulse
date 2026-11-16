@@ -28,6 +28,7 @@ Item {
   property bool historyEnabled: true
   property bool barLyrics: false
   property bool pillProgress: true
+  property bool sleepFade: true
 
   function configure(c) {
     albumColors = c.albumColors !== false
@@ -35,6 +36,7 @@ Item {
     historyEnabled = c.history !== false
     barLyrics = c.barLyrics === true
     pillProgress = c.pillProgress !== false
+    sleepFade = c.sleepFade !== false
   }
 
   readonly property string cacheDir: Quickshell.env("HOME") + "/.cache/spotify-pulse"
@@ -115,6 +117,29 @@ Item {
       + 'r=$(hyprctl dispatch sendshortcut "ALT SHIFT, B, class:^([Ss]potify)$" 2>&1)\n'
       + '[ "$r" = ok ]']
     onExited: function(code) { svc.likeSent(code === 0) }
+  }
+
+  // ---------------------------------------------------------------- open in spotify
+  // Bring the Spotify window forward (Hyprland focus, falling back to MPRIS
+  // Raise). Its Now Playing panel shows this song with Spotify's own
+  // "Add to playlist" button, which free accounts can use too. (Handing the
+  // app the song's link doesn't navigate a running Spotify, and MPRIS
+  // OpenUri would restart the song.)
+
+  function openInSpotify() {
+    if (!running) { launch(); return }
+    focusProc.running = false
+    focusProc.running = true
+  }
+
+  Process {
+    id: focusProc
+    command: ["sh", "-c",
+      'r=$(hyprctl dispatch \'hl.dsp.focus({ window = "class:^([Ss]potify)$" })\' 2>&1)\n'
+      + '[ "$r" = ok ] && exit 0\n'
+      + 'r=$(hyprctl dispatch focuswindow "class:^([Ss]potify)$" 2>&1)\n'
+      + '[ "$r" = ok ]']
+    onExited: function(code) { if (code !== 0 && svc.running && svc.player.canRaise) svc.player.raise() }
   }
 
   // ---------------------------------------------------------------- position
@@ -475,6 +500,7 @@ Item {
   }
   onPlayingChanged: {
     bankListening()
+    if (!playing) restoreVolume()   // paused (by sleep or by hand) mid-fade
     if (!playing) return
     cavaBroken = false
     if (visualizer && !cavaFound && !cavaProbe.running) cavaProbe.running = true
@@ -493,6 +519,7 @@ Item {
   property real lastRemaining: 1e9
 
   function setSleep(minutes) {
+    restoreVolume()   // turned off or changed mid-fade: back to full volume
     sleepTimer.stop()
     sleepDeadline = 0
     lastRemaining = 1e9
@@ -512,9 +539,49 @@ Item {
   }
 
   function sleepNow() {
-    if (playing && player.canPause) player.pause()
+    // The faded volume is put back once Spotify reports the pause (see
+    // onPlayingChanged), so it never blips loud before stopping.
+    var fading = fadeFrom
+    fadeFrom = -1
     setSleep(0)
+    fadeFrom = fading
+    if (playing && player.canPause) player.pause()
+    else restoreVolume()
   }
+
+  // Fade-out: ease the volume down over the last 30 s (10 s for "after this
+  // song") before pausing, then restore it for next time.
+  property real fadeFrom: -1           // volume before fading; -1 = not fading
+
+  function sleepSecondsLeft() {
+    if (sleepEndOfTrack) return duration > 0 ? duration - position : 1e9
+    if (sleepDeadline > 0) return (sleepDeadline - Date.now()) / 1000
+    return 1e9
+  }
+
+  function fadeStep() {
+    if (sleepEndOfTrack) player.positionChanged()
+    var span = sleepEndOfTrack ? 10 : 30
+    var left = sleepSecondsLeft()
+    if (left > span) { restoreVolume(); return }   // seeked back out of the fade
+    if (fadeFrom < 0) fadeFrom = volume
+    setVolume(fadeFrom * Model.clamp(left / span, 0, 1))
+  }
+
+  function restoreVolume() {
+    if (fadeFrom < 0) return
+    var v = fadeFrom
+    fadeFrom = -1
+    setVolume(v)
+  }
+
+  Timer {
+    interval: 500
+    repeat: true
+    running: svc.sleepFade && svc.sleepActive && svc.playing && svc.running && svc.player.volumeSupported
+    onTriggered: svc.fadeStep()
+  }
+  onSleepFadeChanged: if (!sleepFade) restoreVolume()
 
   Timer {
     id: sleepTimer

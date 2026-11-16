@@ -35,7 +35,8 @@
       "coverStyle": "square",
       "karaoke": true,
       "visualizer": true,
-      "history": true
+      "history": true,
+      "sleepFade": true
     },
     "schema": [
       { "key": "maxWidth", "type": "integer", "label": "Max text width (px)", "min": 80, "max": 800, "step": 10, "defaultValue": 260, "description": "Longer titles scroll or get cut off." },
@@ -51,7 +52,8 @@
       { "key": "coverStyle", "type": "enum", "label": "Cover style", "options": ["square", "vinyl"], "defaultValue": "square" },
       { "key": "karaoke", "type": "boolean", "label": "Karaoke sweep", "defaultValue": true, "description": "Fill the current lyric line as it's sung." },
       { "key": "visualizer", "type": "boolean", "label": "Audio visualizer", "defaultValue": true, "description": "Real audio levels when cava is installed." },
-      { "key": "history", "type": "boolean", "label": "Recently played", "defaultValue": true, "description": "Remember tracks in ~/.local/state/spotify-pulse." }
+      { "key": "history", "type": "boolean", "label": "Recently played", "defaultValue": true, "description": "Remember tracks and today's listening stats in ~/.local/state/spotify-pulse." },
+      { "key": "sleepFade", "type": "boolean", "label": "Sleep timer fade-out", "defaultValue": true, "description": "Ease the volume down before the sleep timer pauses (30 s, or 10 s for 'after this song')." }
     ]
   }
 }

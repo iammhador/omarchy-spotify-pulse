@@ -1,4 +1,5 @@
-// Small pill button with an icon and label; tinted with the accent while active.
+// Small pill button with an icon and label (or just an icon); tinted with the
+// accent while active.
 import QtQuick
 import qs.Commons
 
@@ -40,6 +41,7 @@ Rectangle {
     }
     Text {
       anchors.verticalCenter: parent.verticalCenter
+      visible: c.label !== ""   // icon-only chip
       text: c.label
       textFormat: Text.PlainText
       font.family: c.fontFamily

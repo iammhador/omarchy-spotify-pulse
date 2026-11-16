@@ -111,11 +111,12 @@ BarWidget {
   // with the new cover peeking in on track change.
   readonly property string barStyle: choice("barStyle", "cover", ["cover", "wave"])
   readonly property bool pillProgress: flag("pillProgress", true)
+  readonly property bool sleepFade: flag("sleepFade", true)
   readonly property bool vinyl: choice("coverStyle", "square", ["square", "vinyl"]) === "vinyl"
 
   readonly property var serviceConfig: ({
     albumColors: albumColors, visualizer: visualizer, history: historyOn,
-    barLyrics: barLyrics, pillProgress: pillProgress
+    barLyrics: barLyrics, pillProgress: pillProgress, sleepFade: sleepFade
   })
   onServiceConfigChanged: pushConfig()
   function pushConfig() { if (svc) svc.configure(serviceConfig) }
@@ -171,6 +172,96 @@ BarWidget {
   function cycleRepeat() { if (svc) svc.cycleRepeat() }
   function toggleLyrics() { if (svc) svc.lyricsOn = !svc.lyricsOn }
   function toggleLike() { if (svc) svc.toggleLike() }
+  function openInSpotify() { if (svc) svc.openInSpotify(); else launch() }
+
+  // ---- share card
+  // Render PulseShareCard off screen (it lives clipped away inside the bar,
+  // so this works with the card closed too), save it as a PNG, then copy it
+  // to the clipboard and keep a copy in ~/Pictures/Spotify Pulse.
+  property bool sharing: false
+  property int shareWaits: 0
+  readonly property string sharePath: (Quickshell.env("XDG_RUNTIME_DIR") || "/tmp") + "/spotify-pulse-share.png"
+
+  function shareCard() {
+    if (!running || sharing || title === "") return
+    shareWaits = 0
+    sharing = true
+    shareWait.restart()
+  }
+
+  function shareFileName() {
+    var name = (title + (artist ? " - " + artist : "")).replace(/[\/\\:*?"<>|\u0000-\u001f]/g, "").trim()
+    return (name.substring(0, 80) || "Now playing") + ".png"
+  }
+
+  Timer {
+    id: shareWait
+    interval: 100
+    repeat: true
+    onTriggered: {
+      var card = shareLoader.item
+      // Give the cover up to 5 s to load; share without it after that.
+      if (!card || (!card.ready && ++root.shareWaits < 50)) return
+      stop()
+      card.grabToImage(function(result) {
+        if (result.saveToFile(root.sharePath)) {
+          shareProc.fileName = root.shareFileName()
+          shareProc.running = true
+        } else {
+          root.sharing = false
+          root.toast("Couldn't render the card")
+        }
+      }, Qt.size(card.width * 2, card.height * 2))
+    }
+  }
+
+  Process {
+    id: shareProc
+    property string fileName: ""
+    command: ["sh", "-c",
+      'dir=$(xdg-user-dir PICTURES 2>/dev/null); { [ -n "$dir" ] && [ "$dir" != "$HOME" ]; } || dir="$HOME/Pictures"\n'
+      + 'dir="$dir/Spotify Pulse"\n'
+      + 'mkdir -p "$dir" && cp "$1" "$dir/$2" || exit 2\n'
+      + 'wl-copy --type image/png < "$1" || exit 3',
+      "sh", root.sharePath, fileName]
+    onExited: function(code) {
+      root.sharing = false
+      var msg = code === 0 ? "Card copied · saved in Pictures/Spotify Pulse"
+        : code === 3 ? "Saved in Pictures/Spotify Pulse (couldn't copy)"
+        : "Couldn't save the card"
+      if (root.popupOpen) root.toast(msg)
+      else Quickshell.execDetached(["notify-send", "-a", "Spotify Pulse", "Spotify Pulse", msg])
+    }
+  }
+
+  // Off screen: a zero-size clip keeps it from ever showing.
+  Item {
+    width: 0
+    height: 0
+    clip: true
+    Loader {
+      id: shareLoader
+      active: root.sharing
+      sourceComponent: PulseShareCard {
+        source: root.artUrl
+        title: root.title
+        artist: root.artist
+        album: root.album
+        position: root.position
+        duration: root.duration
+        accent: root.animatedAccent
+        accent2: root.animatedAccent2
+        fontFamily: root.fontFamily
+      }
+    }
+  }
+
+  // Short message over the card (share result and such).
+  property string toastText: ""
+  function toast(text) {
+    toastText = text
+    toastAnim.restart()
+  }
 
   // Brief filled heart after a like request reached Spotify.
   property bool likeFlash: false
@@ -268,6 +359,10 @@ BarWidget {
     function clearHistory(): void { if (root.svc) root.svc.clearHistory() }
     // Toggle the current song in Liked Songs (sends Spotify its shortcut).
     function like(): void { root.toggleLike() }
+    // Bring Spotify forward on the current song's page.
+    function open(): void { root.openInSpotify() }
+    // Copy a "Now playing" image to the clipboard (also saved to Pictures).
+    function share(): void { root.shareCard() }
     function status(): string {
       var s = root.svc
       return JSON.stringify({
@@ -564,6 +659,8 @@ BarWidget {
         else if (e.key === Qt.Key_R) root.cycleRepeat()
         else if (e.key === Qt.Key_L) root.toggleLyrics()
         else if (e.key === Qt.Key_H) root.toggleLike()
+        else if (e.key === Qt.Key_O) { root.openInSpotify(); root.close() }
+        else if (e.key === Qt.Key_C) root.shareCard()
         else if (e.key === Qt.Key_Z) { if (root.svc) root.svc.cycleSleep() }
         else if (e.key === Qt.Key_BracketLeft && root.lyricsOn) { if (root.svc) root.svc.nudgeLyrics(0.5) }
         else if (e.key === Qt.Key_BracketRight && root.lyricsOn) { if (root.svc) root.svc.nudgeLyrics(-0.5) }
@@ -629,6 +726,39 @@ BarWidget {
       layer.enabled: true
       visible: false
       Rectangle { anchors.fill: parent; radius: Style.cornerRadius }
+    }
+
+    // Toast: a short confirmation floating over the top of the card.
+    Rectangle {
+      id: cardToast
+      z: 30
+      anchors.horizontalCenter: parent.horizontalCenter
+      y: Style.space(10)
+      width: Math.min(parent.width - Style.space(16), toastLabel.implicitWidth + Style.space(24))
+      height: toastLabel.implicitHeight + Style.space(12)
+      radius: height / 2
+      color: Util.alpha(Commons.Color.background, 0.92)
+      border.width: 1
+      border.color: Util.alpha(root.animatedAccent, 0.55)
+      opacity: 0
+      visible: opacity > 0
+      Text {
+        id: toastLabel
+        anchors.centerIn: parent
+        width: Math.min(implicitWidth, cardToast.parent.width - Style.space(40))
+        text: root.toastText
+        textFormat: Text.PlainText
+        elide: Text.ElideRight
+        color: root.panelFg
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+      }
+      SequentialAnimation {
+        id: toastAnim
+        NumberAnimation { target: cardToast; property: "opacity"; to: 1; duration: Style.duration(160) }
+        PauseAnimation { duration: 2200 }
+        NumberAnimation { target: cardToast; property: "opacity"; to: 0; duration: Style.duration(400) }
+      }
     }
 
     Column {
@@ -1124,7 +1254,8 @@ BarWidget {
         // Sleep: off → 15 → 30 → 60 min → end of track → off.
         PulseChip {
           readonly property var s: root.svc
-          anchors.horizontalCenter: parent.horizontalCenter
+          anchors.left: lyricsChip.right
+          anchors.leftMargin: Style.space(8)
           icon: "󰒲"
           label: !s || !s.sleepActive ? "Sleep" : (s.sleepEndOfTrack ? "After song" : s.sleepLeft + " min")
           fg: root.panelFg
@@ -1133,14 +1264,29 @@ BarWidget {
           active: !!s && s.sleepActive
           onClicked: if (s) s.cycleSleep()
         }
-        PulseChip {
+        Row {
           anchors.right: parent.right
-          icon: "󰓇"
-          label: "Spotify"
-          fg: root.panelFg
-          accent: root.spotifyGreen
-          fontFamily: root.fontFamily
-          onClicked: { root.launch(); root.close() }
+          spacing: Style.space(8)
+
+          // Share: a "Now playing" image to the clipboard (and Pictures).
+          PulseChip {
+            icon: root.sharing ? "󰔟" : "󰄀"
+            label: ""
+            fg: root.panelFg
+            accent: root.animatedAccent
+            fontFamily: root.fontFamily
+            active: root.sharing
+            onClicked: root.shareCard()
+          }
+          // Open in Spotify: the app comes forward on this song's page.
+          PulseChip {
+            icon: "󰓇"
+            label: ""
+            fg: root.panelFg
+            accent: root.spotifyGreen
+            fontFamily: root.fontFamily
+            onClicked: { root.openInSpotify(); root.close() }
+          }
         }
       }
     }
