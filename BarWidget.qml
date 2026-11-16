@@ -19,6 +19,7 @@
 
 import QtQuick
 import QtQuick.Effects
+import QtQuick.Shapes
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Mpris
@@ -282,40 +283,6 @@ BarWidget {
       swapAnim.restart()
     }
 
-    // Progress through the song, as a hairline along the bottom.
-    Rectangle {
-      anchors.left: parent.left
-      anchors.bottom: parent.bottom
-      anchors.leftMargin: parent.radius * 0.6
-      anchors.bottomMargin: 1
-      visible: root.pillProgress && root.running && root.duration > 0
-      height: Math.max(1, Style.space(2))
-      radius: height / 2
-      width: (parent.width - parent.radius * 1.2) * root.progress
-      opacity: root.volumeFlash > 0 ? 0 : (root.playing ? 0.75 : 0.35)
-      gradient: Gradient {
-        orientation: Gradient.Horizontal
-        GradientStop { position: 0.0; color: root.animatedAccent }
-        GradientStop { position: 1.0; color: root.animatedAccent2 }
-      }
-      Behavior on opacity { NumberAnimation { duration: Style.duration(220) } }
-    }
-
-    // Spotify volume, briefly, after a scroll.
-    Rectangle {
-      anchors.left: parent.left
-      anchors.bottom: parent.bottom
-      anchors.leftMargin: parent.radius * 0.6
-      anchors.bottomMargin: 1
-      height: Math.max(2, Style.space(2))
-      radius: height / 2
-      width: (parent.width - parent.radius * 1.2) * root.volume
-      color: root.animatedAccent
-      opacity: root.volumeFlash
-      Behavior on opacity { NumberAnimation { duration: Style.duration(220) } }
-      Behavior on width { NumberAnimation { duration: Style.duration(120) } }
-    }
-
     Row {
       id: pillRow
       anchors.centerIn: parent
@@ -360,38 +327,89 @@ BarWidget {
         }
       }
 
-      // Equalizer: real levels from the visualizer, or a gentle stand-in.
+      // Equalizer inside a progress ring that fills clockwise as the song
+      // plays. Right after a scroll the ring shows Spotify's volume instead.
       Item {
-        id: eq
-        width: Style.space(13)
-        height: Style.space(12)
+        id: eqRing
+        readonly property bool showVolume: root.volumeFlash > 0 && root.running
+        readonly property bool shown: showVolume || (root.pillProgress && root.running && root.duration > 0)
+        readonly property real fraction: showVolume ? root.volume : root.progress
+        readonly property real stroke: Math.max(1.5, Style.space(2))
+        readonly property real size: pill.height - Style.space(2)
+        width: shown ? size : eq.width
+        height: shown ? size : eq.height
         anchors.verticalCenter: parent.verticalCenter
-        property real phase: 0
-        NumberAnimation on phase {
-          from: 0; to: 1
-          duration: 1100
-          loops: Animation.Infinite
-          running: root.playing && root.visible && !root.vizLive && root.motion
-        }
-        Repeater {
-          model: 3
-          Rectangle {
-            required property int index
-            readonly property real wave: root.vizLive
-              ? Model.band(root.levels, index / 3, (index + 1) / 3)
-              : (root.motion ? Math.abs(Math.sin((eq.phase + index * 0.37) * Math.PI * (2 + index * 0.6))) : 0.55)
-            x: index * (eq.width / 3)
-            width: Math.max(2, Math.round(eq.width / 3) - 1)
-            radius: width / 2
-            height: root.playing ? eq.height * (0.3 + 0.7 * wave) : eq.height * 0.28
-            anchors.bottom: parent.bottom
-            // Each bar runs from one accent at the base to the other at the tip.
-            gradient: Gradient {
-              GradientStop { position: 0.0; color: root.running ? root.animatedAccent2 : root.barFg }
-              GradientStop { position: 1.0; color: root.running ? root.animatedAccent : root.barFg }
+
+        Shape {
+          anchors.fill: parent
+          visible: eqRing.shown
+          preferredRendererType: Shape.CurveRenderer
+          opacity: root.playing || eqRing.showVolume ? 1 : 0.5
+          Behavior on opacity { NumberAnimation { duration: Style.duration(200) } }
+
+          // Track: the whole song, dim.
+          ShapePath {
+            strokeWidth: eqRing.stroke
+            strokeColor: Util.alpha(root.barFg, 0.18)
+            fillColor: "transparent"
+            PathAngleArc {
+              centerX: eqRing.width / 2
+              centerY: eqRing.height / 2
+              radiusX: (eqRing.width - eqRing.stroke) / 2
+              radiusY: radiusX
+              startAngle: 0
+              sweepAngle: 360
             }
-            opacity: root.playing ? 1 : 0.5
-            Behavior on height { enabled: !root.playing; NumberAnimation { duration: Style.duration(200) } }
+          }
+          // Played so far (or the volume), from 12 o'clock.
+          ShapePath {
+            strokeWidth: eqRing.stroke
+            strokeColor: eqRing.showVolume ? root.barFg : root.animatedAccent
+            fillColor: "transparent"
+            capStyle: ShapePath.RoundCap
+            PathAngleArc {
+              centerX: eqRing.width / 2
+              centerY: eqRing.height / 2
+              radiusX: (eqRing.width - eqRing.stroke) / 2
+              radiusY: radiusX
+              startAngle: -90
+              sweepAngle: 360 * Model.clamp(eqRing.fraction, 0, 1)
+            }
+          }
+        }
+
+        Item {
+          id: eq
+          width: eqRing.shown ? Math.round(eqRing.size * 0.5) : Style.space(13)
+          height: eqRing.shown ? Math.round(eqRing.size * 0.44) : Style.space(12)
+          anchors.centerIn: parent
+          property real phase: 0
+          NumberAnimation on phase {
+            from: 0; to: 1
+            duration: 1100
+            loops: Animation.Infinite
+            running: root.playing && root.visible && !root.vizLive && root.motion
+          }
+          Repeater {
+            model: 3
+            Rectangle {
+              required property int index
+              readonly property real wave: root.vizLive
+                ? Model.band(root.levels, index / 3, (index + 1) / 3)
+                : (root.motion ? Math.abs(Math.sin((eq.phase + index * 0.37) * Math.PI * (2 + index * 0.6))) : 0.55)
+              x: index * (eq.width / 3)
+              width: Math.max(2, Math.round(eq.width / 3) - 1)
+              radius: width / 2
+              height: root.playing ? eq.height * (0.3 + 0.7 * wave) : eq.height * 0.28
+              anchors.bottom: parent.bottom
+              // Each bar runs from one accent at the base to the other at the tip.
+              gradient: Gradient {
+                GradientStop { position: 0.0; color: root.running ? root.animatedAccent2 : root.barFg }
+                GradientStop { position: 1.0; color: root.running ? root.animatedAccent : root.barFg }
+              }
+              opacity: root.playing ? 1 : 0.5
+              Behavior on height { enabled: !root.playing; NumberAnimation { duration: Style.duration(200) } }
+            }
           }
         }
       }
