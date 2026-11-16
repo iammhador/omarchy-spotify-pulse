@@ -645,6 +645,7 @@ BarWidget {
           fontFamily: root.fontFamily
           energy: root.popupOpen ? root.bass : 0
           onDoubleClicked: { if (root.svc) root.svc.lyricsOn = true }
+          onSkip: function(dir) { if (dir > 0) root.next(); else root.previous() }
         }
 
         back: PulseLyrics {
@@ -706,33 +707,16 @@ BarWidget {
           id: miniEq
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
-          width: Style.space(18)
+          width: Style.space(24)
           height: Style.space(16)
-          property real phase: 0
-          NumberAnimation on phase {
-            from: 0; to: 1
-            duration: 1100
-            loops: Animation.Infinite
-            running: root.playing && root.popupOpen && !root.vizLive && root.motion
-          }
-          Repeater {
-            model: 4
-            Rectangle {
-              required property int index
-              readonly property real wave: root.vizLive
-                ? Model.band(root.levels, index / 4, (index + 1) / 4)
-                : (root.motion ? Math.abs(Math.sin((miniEq.phase + index * 0.29) * Math.PI * (2 + index * 0.5))) : 0.55)
-              x: index * (miniEq.width / 4)
-              width: Math.max(2, Math.round(miniEq.width / 4) - 2)
-              radius: width / 2
-              anchors.bottom: parent.bottom
-              height: root.playing ? miniEq.height * (0.25 + 0.75 * wave) : miniEq.height * 0.2
-              gradient: Gradient {
-                GradientStop { position: 0.0; color: root.animatedAccent2 }
-                GradientStop { position: 1.0; color: root.animatedAccent }
-              }
-              Behavior on height { enabled: !root.playing; NumberAnimation { duration: Style.duration(220) } }
-            }
+          // The same flowing wave as the bar.
+          PulseWave {
+            anchors.fill: parent
+            playing: root.playing
+            live: root.popupOpen
+            levels: root.vizLive ? root.levels : []
+            color: root.animatedAccent
+            opacity: root.playing ? 1 : 0.5
           }
         }
       }
@@ -745,6 +729,7 @@ BarWidget {
         opacity: root.duration > 0 ? 1 : 0.4
 
         PulseSlider {
+          id: seekSlider
           width: parent.width
           value: root.position
           maximum: Math.max(1, root.duration)
@@ -753,6 +738,59 @@ BarWidget {
           track: Util.alpha(root.panelFg, 0.15)
           enabled: root.running && root.player.canSeek && root.duration > 0
           onReleased: function(v) { root.seekTo(v) }
+
+          // Preview: the time under the pointer, and the lyric line sung
+          // there when synced lyrics are already loaded (never fetched here).
+          Rectangle {
+            id: seekBubble
+            readonly property real t: seekSlider.previewValue
+            readonly property string line: {
+              var s = root.svc
+              if (!s || !s.lyricsSynced || s.lyricLines.length === 0) return ""
+              var i = Model.lyricIndex(s.lyricLines, t + s.lyricsOffset)
+              var text = i >= 0 ? s.lyricLines[i].text : ""
+              return text === "♪" ? "" : text
+            }
+            z: 10
+            opacity: (seekSlider.hovering || seekSlider.dragging) && root.duration > 0 ? 1 : 0
+            visible: opacity > 0
+            Behavior on opacity { NumberAnimation { duration: Style.duration(140) } }
+            width: Math.min(seekSlider.width, bubbleCol.implicitWidth + Style.space(18))
+            height: bubbleCol.implicitHeight + Style.space(10)
+            radius: Style.space(8)
+            x: Model.clamp(seekSlider.previewX - width / 2, 0, seekSlider.width - width)
+            y: -height - Style.space(6)
+            color: Util.alpha(Commons.Color.background, 0.94)
+            border.width: 1
+            border.color: Util.alpha(root.animatedAccent, 0.45)
+
+            Column {
+              id: bubbleCol
+              anchors.centerIn: parent
+              spacing: Style.space(1)
+              Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: Model.timestamp(seekBubble.t)
+                color: root.animatedAccent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+                font.features: { "tnum": 1 }
+              }
+              Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: seekBubble.line !== ""
+                width: Math.min(implicitWidth, seekSlider.width - Style.space(18))
+                text: seekBubble.line
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                horizontalAlignment: Text.AlignHCenter
+                color: Util.alpha(root.panelFg, 0.85)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+          }
         }
         Item {
           width: parent.width
@@ -780,7 +818,8 @@ BarWidget {
       Item {
         id: transport
         width: parent.width
-        height: playBtn.height
+        // Room for the progress ring around the play button.
+        height: playRing.height
 
         PulseIconButton {
           anchors.left: parent.left
@@ -824,12 +863,44 @@ BarWidget {
             scale: playMouse.pressed ? 0.86 : (playMouse.containsMouse ? 1.07 : 1)
             Behavior on scale { NumberAnimation { duration: Style.duration(240); easing.type: Easing.OutBack; easing.overshoot: 3 } }
 
+            // Progress ring around the button, echoing the bar.
+            Shape {
+              id: playRing
+              readonly property real stroke: Math.max(1.5, Style.space(2))
+              z: -1
+              anchors.centerIn: parent
+              width: parent.width + Style.space(14)
+              height: width
+              preferredRendererType: Shape.CurveRenderer
+              ShapePath {
+                strokeWidth: playRing.stroke
+                strokeColor: Util.alpha(root.panelFg, 0.12)
+                fillColor: "transparent"
+                PathAngleArc {
+                  centerX: playRing.width / 2; centerY: playRing.height / 2
+                  radiusX: (playRing.width - playRing.stroke) / 2; radiusY: radiusX
+                  startAngle: 0; sweepAngle: 360
+                }
+              }
+              ShapePath {
+                strokeWidth: playRing.stroke
+                strokeColor: root.animatedAccent
+                fillColor: "transparent"
+                capStyle: ShapePath.RoundCap
+                PathAngleArc {
+                  centerX: playRing.width / 2; centerY: playRing.height / 2
+                  radiusX: (playRing.width - playRing.stroke) / 2; radiusY: radiusX
+                  startAngle: -90; sweepAngle: 360 * Model.clamp(root.progress, 0, 1)
+                }
+              }
+            }
+
             // Pulse ring while playing.
             Rectangle {
               id: pulseRing
               z: -1
               anchors.centerIn: parent
-              width: parent.width
+              width: playRing.width
               height: width
               radius: width / 2
               color: "transparent"
@@ -841,7 +912,7 @@ BarWidget {
                 loops: Animation.Infinite
                 onRunningChanged: if (!running) { pulseRing.opacity = 0; pulseRing.scale = 1 }
                 ParallelAnimation {
-                  NumberAnimation { target: pulseRing; property: "scale"; from: 1; to: 1.45; duration: 1600; easing.type: Easing.OutCubic }
+                  NumberAnimation { target: pulseRing; property: "scale"; from: 1; to: 1.3; duration: 1600; easing.type: Easing.OutCubic }
                   NumberAnimation { target: pulseRing; property: "opacity"; from: 0.5; to: 0; duration: 1600; easing.type: Easing.OutCubic }
                 }
               }

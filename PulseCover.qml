@@ -20,6 +20,38 @@ Item {
   property real energy: 0            // 0..1 bass level, 0 without a visualizer
 
   signal doubleClicked()
+  // Swiped off: 1 = next (swiped left), -1 = previous (swiped right).
+  signal skip(int dir)
+
+  // Horizontal swipe offset of the cover (and its glow).
+  property real dragX: 0
+  readonly property real dragAmount: Math.min(1, Math.abs(dragX) / (coverSize * 0.28))
+  onLiveChanged: if (!live) { fly.stop(); spring.stop(); dragX = 0 }
+
+  function springBack() {
+    if (Style.reduceMotion) { dragX = 0; return }
+    spring.restart()
+  }
+  function flyOff(dir) {
+    if (Style.reduceMotion) { dragX = 0; skip(dir); return }
+    fly.dir = dir
+    fly.restart()
+  }
+
+  NumberAnimation {
+    id: spring
+    target: c; property: "dragX"; to: 0
+    duration: 380
+    easing.type: Easing.OutBack; easing.overshoot: 1.6
+  }
+  // Off one side, skip, then the next cover glides in from the other.
+  SequentialAnimation {
+    id: fly
+    property int dir: 1
+    NumberAnimation { target: c; property: "dragX"; to: -fly.dir * c.width * 1.1; duration: 200; easing.type: Easing.InCubic }
+    ScriptAction { script: { c.skip(fly.dir); c.dragX = fly.dir * c.width * 0.7 } }
+    NumberAnimation { target: c; property: "dragX"; to: 0; duration: 460; easing.type: Easing.OutBack; easing.overshoot: 1.1 }
+  }
 
   readonly property real coverSize: Math.min(width, height) - Style.space(16)
   readonly property real coverRadius: vinyl ? coverSize / 2 : Math.max(Style.cornerRadius, Style.space(14))
@@ -52,15 +84,18 @@ Item {
     blurEnabled: true
     blur: 1.0
     blurMax: 48
-    opacity: c.glowBase + (c.playing ? 0.4 * c.pulse : 0)
+    opacity: (c.glowBase + (c.playing ? 0.4 * c.pulse : 0)) * cover.opacity
     scale: cover.scale * (1 + 0.07 * c.pulse)
   }
 
   Item {
     id: cover
     anchors.centerIn: parent
+    anchors.horizontalCenterOffset: c.dragX
     width: c.coverSize
     height: width
+    rotation: c.dragX * 0.03
+    opacity: 1 - Math.min(0.6, Math.abs(c.dragX) / (c.width * 1.2))
     scale: c.playing ? 1 : 0.88
     Behavior on scale { NumberAnimation { duration: Style.duration(520); easing.type: Easing.OutBack; easing.overshoot: 1.6 } }
     layer.enabled: true
@@ -178,9 +213,75 @@ Item {
     Rectangle { anchors.fill: parent; radius: c.coverRadius }
   }
 
+  // Hints at the edges while swiping: where the swipe will take you.
+  Text {
+    anchors.left: parent.left
+    anchors.leftMargin: Style.space(10)
+    anchors.verticalCenter: parent.verticalCenter
+    text: "󰒮"
+    color: c.fg
+    font.family: c.fontFamily
+    font.pixelSize: Style.font.iconLarge + Style.space(6)
+    opacity: c.dragX > 0 ? c.dragAmount * 0.9 : 0
+    scale: 0.7 + 0.3 * (c.dragX > 0 ? c.dragAmount : 0)
+  }
+  Text {
+    anchors.right: parent.right
+    anchors.rightMargin: Style.space(10)
+    anchors.verticalCenter: parent.verticalCenter
+    text: "󰒭"
+    color: c.fg
+    font.family: c.fontFamily
+    font.pixelSize: Style.font.iconLarge + Style.space(6)
+    opacity: c.dragX < 0 ? c.dragAmount * 0.9 : 0
+    scale: 0.7 + 0.3 * (c.dragX < 0 ? c.dragAmount : 0)
+  }
+
+  // Swipe the cover to skip; double-click it for lyrics. The area stays where
+  // the cover rests, so it doesn't slide away under the pointer.
   MouseArea {
-    anchors.fill: cover
-    cursorShape: Qt.PointingHandCursor
-    onDoubleClicked: c.doubleClicked()
+    id: swipe
+    anchors.centerIn: parent
+    width: c.coverSize
+    height: c.coverSize
+    preventStealing: true
+    cursorShape: dragging ? Qt.ClosedHandCursor : Qt.OpenHandCursor
+
+    property bool dragging: false
+    property real startX: 0
+    property real lastX: 0
+    property double lastT: 0
+    property real velocity: 0          // px per ms
+
+    onPressed: function(m) {
+      if (fly.running) return
+      spring.stop()
+      startX = m.x - c.dragX
+      lastX = m.x
+      lastT = Date.now()
+      velocity = 0
+      dragging = false
+    }
+    onPositionChanged: function(m) {
+      if (!pressed || fly.running) return
+      var dx = m.x - startX
+      if (!dragging && Math.abs(dx) > 6) dragging = true
+      if (!dragging) return
+      c.dragX = dx
+      var now = Date.now()
+      if (now > lastT) velocity = (m.x - lastX) / (now - lastT)
+      lastX = m.x
+      lastT = now
+    }
+    onReleased: {
+      if (!dragging) return
+      dragging = false
+      var far = Math.abs(c.dragX) > c.coverSize * 0.28
+      var flick = Math.abs(velocity) > 0.8 && Math.abs(c.dragX) > 20 && (velocity < 0) === (c.dragX < 0)
+      if (far || flick) c.flyOff(c.dragX < 0 ? 1 : -1)
+      else c.springBack()
+    }
+    onCanceled: { dragging = false; c.springBack() }
+    onDoubleClicked: if (!dragging) c.doubleClicked()
   }
 }
