@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.1
+
+After updating, run `omarchy restart shell`.
+
+- **Fixed:** today's listening stats could reset to zero when the shell started while music was playing. They now load before anything is counted, and listening time is saved every minute.
+- **Fixed:** the sleep timer paused several seconds early (QML timers drift); it now goes by the clock, so the fade-out ends exactly on time.
+- **New:** your own lyrics. Save `Artist - Title.lrc` (or `.txt`) in `~/.local/share/spotify-pulse/lyrics/` for songs lrclib doesn't have; it's used first, offline.
+- New demo GIF and screenshot showing the 1.1 design (made-up songs and covers).
+
 ## 1.1.0
 
 After updating, run `omarchy restart shell` so the new version loads.

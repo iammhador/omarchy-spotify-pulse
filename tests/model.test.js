@@ -56,4 +56,7 @@ o = outlinePoints(20, 20, 50, 0, 0.25, P); assert.ok(o.every(p => isFinite(p.x) 
 assert.equal(formatListening(0), "<1 m"); assert.equal(formatListening(59), "<1 m");
 assert.equal(formatListening(14 * 60 + 5), "14 m"); assert.equal(formatListening(72 * 60), "1 h 12 m");
 assert.equal(formatListening(7200), "2 h"); assert.equal(formatListening(NaN), "<1 m");
+// lyricsFileName
+assert.equal(lyricsFileName("Luma Vale", "Neon Horizon"), "Luma Vale - Neon Horizon");
+assert.equal(lyricsFileName("AC/DC", "What? Now: \"x\""), "ACDC - What Now x");
 console.log("all Model.js tests passed");

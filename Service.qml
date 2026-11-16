@@ -258,6 +258,11 @@ Item {
       lyricsStatus = cached.status
       return
     }
+    // Your own lyrics win: ~/.local/share/spotify-pulse/lyrics/Artist - Title.lrc
+    // (or .txt for plain text), read locally, nothing sent anywhere.
+    var local = readLocalLyrics()
+    if (local !== null) { finishLyrics(key, local, 200); return }
+
     lyricLines = []
     lyricsSynced = true
     lyricsStatus = "loading"
@@ -283,6 +288,29 @@ Item {
                        status === 200 || status === 404 ? status : status2)
       })
     })
+  }
+
+  readonly property string lyricsDir: (Quickshell.env("XDG_DATA_HOME") || Quickshell.env("HOME") + "/.local/share") + "/spotify-pulse/lyrics"
+  FileView {
+    id: localLyricsFile
+    printErrors: false
+    blockLoading: true   // text() waits for the file instead of returning ""
+  }
+
+  // { synced, plain } from a local .lrc / .txt file for this song, or null.
+  function readLocalLyrics() {
+    var base = lyricsDir + "/" + Model.lyricsFileName(artist, title)
+    var exts = [".lrc", ".txt"]
+    for (var i = 0; i < exts.length; i++) {
+      localLyricsFile.path = base + exts[i]
+      var text = localLyricsFile.text() || ""
+      if (String(text).trim() === "") continue
+      return Model.parseLrc(text).length
+        ? { synced: text, plain: "", instrumental: false }
+        : { synced: "", plain: text, instrumental: false }
+    }
+    localLyricsFile.path = ""
+    return null
   }
 
   function cancelLyricsFetch() {
@@ -368,8 +396,13 @@ Item {
     id: historyFile
     path: svc.stateDir + "/history.json"
     printErrors: false
-    onLoaded: svc.history = Model.parseHistory(historyFile.text())
+    // Load before anything can record, so a write never replaces the file
+    // with a list that hasn't been read yet.
+    blockLoading: true
+    onLoaded: { svc.history = Model.parseHistory(historyFile.text()); svc.historyReady = true }
+    onLoadFailed: svc.historyReady = true   // no file yet
   }
+  property bool historyReady: false
 
   Timer {
     id: historyTimer
@@ -379,7 +412,7 @@ Item {
   }
 
   function recordTrack() {
-    if (!historyEnabled || trackUri === "" || recordedKey === trackKey) return
+    if (!historyEnabled || !historyReady || trackUri === "" || recordedKey === trackKey) return
     recordedKey = trackKey
     history = Model.pushHistory(history, {
       uri: trackUri, title: title, artist: artist, album: album, art: artUrl
@@ -415,6 +448,10 @@ Item {
     id: statsFile
     path: svc.stateDir + "/stats.json"
     printErrors: false
+    // Read today's totals before anything is banked: banking first used to
+    // see no date, take it for a new day and save zeros over the file.
+    blockLoading: true
+    onLoadFailed: { svc.statsReady = true; svc.rollDay() }   // no file yet
     onLoaded: {
       try {
         var d = JSON.parse(statsFile.text())
@@ -422,8 +459,19 @@ Item {
         svc.statsSeconds = Math.max(0, Number(d.seconds) || 0)
         svc.statsSongs = Math.max(0, Math.round(Number(d.songs) || 0))
       } catch (e) {}
+      svc.statsReady = true
       svc.rollDay()
     }
+  }
+  property bool statsReady: false
+
+  // Bank the time played every minute too, so a shell restart or crash loses
+  // at most a minute of today's total.
+  Timer {
+    interval: 60000
+    repeat: true
+    running: svc.playing && svc.historyEnabled && svc.statsReady
+    onTriggered: svc.bankListening()
   }
 
   function today() { return Qt.formatDate(new Date(), "yyyy-MM-dd") }
@@ -441,7 +489,7 @@ Item {
   // playing.
   function bankListening() {
     var t = Date.now()
-    if (playStart > 0 && historyEnabled) {
+    if (playStart > 0 && historyEnabled && statsReady) {
       rollDay()
       // A stretch over 6 h means a missed pause (suspend); don't count it.
       var secs = (t - playStart) / 1000
@@ -453,7 +501,7 @@ Item {
   }
 
   function saveStats() {
-    if (!historyEnabled) return
+    if (!historyEnabled || !statsReady) return
     statsFile.setText(JSON.stringify({ day: statsDay || today(), seconds: Math.round(statsSeconds), songs: statsSongs }))
   }
 
